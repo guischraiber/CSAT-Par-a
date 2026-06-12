@@ -483,14 +483,6 @@ export default function App() {
     }
   }, [parsed]);
 
-  // Período atual selecionado
-  const periodoAtual = useMemo(() => {
-    if (!parsed) return null;
-    if (modoSelecao === "consolidar" && periodoConsolidado) return periodoConsolidado;
-    if (modoPeriodo === "semana") return parsed.porSemana.find(s => s.semana === periodoSel) || parsed.porSemana[parsed.porSemana.length - 1];
-    return parsed.porMes.find(m => m.mes === periodoSel) || parsed.porMes[parsed.porMes.length - 1];
-  }, [parsed, modoPeriodo, periodoSel, modoSelecao, periodoConsolidado]);
-
   // Lista de períodos para o seletor
   const periodos = useMemo(() => {
     if (!parsed) return [];
@@ -503,13 +495,6 @@ export default function App() {
     if (!parsed) return [];
     return (modoPeriodo === "semana" ? parsed.porSemana : parsed.porMes).map(p => ({ label: p.label, share: p.share, taxa: p.taxa }));
   }, [parsed, modoPeriodo]);
-
-  // Lista de parceiros do período atual
-  const parceirosDisponiveis = useMemo(() => {
-    if (!periodoAtual) return [];
-    const nomes = periodoAtual.parceiros.map(p => p.nome).sort();
-    return ["Todos", ...nomes];
-  }, [periodoAtual]);
 
   // Resetar filtro ao trocar período
   const setPeriodoSelComReset = useCallback((val) => {
@@ -590,6 +575,14 @@ export default function App() {
     return consolidarPeriodos(periodosAtivos);
   }, [modoSelecao, periodosAtivos, consolidarPeriodos]);
 
+  // Período atual selecionado — definido APÓS periodoConsolidado
+  const periodoAtual = useMemo(() => {
+    if (!parsed) return null;
+    if (modoSelecao === "consolidar" && periodoConsolidado) return periodoConsolidado;
+    if (modoPeriodo === "semana") return parsed.porSemana.find(s => s.semana === periodoSel) || parsed.porSemana[parsed.porSemana.length - 1];
+    return parsed.porMes.find(m => m.mes === periodoSel) || parsed.porMes[parsed.porMes.length - 1];
+  }, [parsed, modoPeriodo, periodoSel, modoSelecao, periodoConsolidado]);
+
   // Dados filtrados pelo parceiro selecionado
   const periodoFiltrado = useMemo(() => {
     if (!periodoAtual || parceroFiltro === "Todos") return periodoAtual;
@@ -618,6 +611,13 @@ export default function App() {
       comentariosPos: periodoAtual.comentariosPos.filter(c => c.transp === parceroFiltro),
     };
   }, [periodoAtual, parceroFiltro]);
+
+  // Lista de parceiros — depende de periodoAtual (definido acima)
+  const parceirosDisponiveis = useMemo(() => {
+    if (!periodoAtual) return [];
+    const nomes = periodoAtual.parceiros.map(p => p.nome).sort();
+    return ["Todos", ...nomes];
+  }, [periodoAtual]);
 
   const tabs = [
     { id: "overview", label: "Visão Geral" },
