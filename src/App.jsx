@@ -381,6 +381,7 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [linkGerado, setLinkGerado] = useState(null);
   const [fromURL, setFromURL] = useState(false);
+  const [parceroFiltro, setParceroFiltro] = useState("Todos");
 
   // Carregar dados da URL ao montar
   useEffect(() => {
@@ -499,6 +500,48 @@ export default function App() {
     return (modoPeriodo === "semana" ? parsed.porSemana : parsed.porMes).map(p => ({ label: p.label, share: p.share, taxa: p.taxa }));
   }, [parsed, modoPeriodo]);
 
+  // Lista de parceiros do período atual
+  const parceirosDisponiveis = useMemo(() => {
+    if (!periodoAtual) return [];
+    const nomes = periodoAtual.parceiros.map(p => p.nome).sort();
+    return ["Todos", ...nomes];
+  }, [periodoAtual]);
+
+  // Resetar filtro ao trocar período
+  const setPeriodoSelComReset = useCallback((val) => {
+    setPeriodoSel(val);
+    setParceroFiltro("Todos");
+  }, []);
+
+  // Dados filtrados pelo parceiro selecionado
+  const periodoFiltrado = useMemo(() => {
+    if (!periodoAtual || parceroFiltro === "Todos") return periodoAtual;
+    return {
+      ...periodoAtual,
+      parceiros: periodoAtual.parceiros.filter(p => p.nome === parceroFiltro),
+      motivos: (() => {
+        // Recalcular motivos só para o parceiro filtrado
+        const comsNeg = periodoAtual.comentariosNeg.filter(c => c.transp === parceroFiltro);
+        const dims = [
+          { key: "experiencia_geral", label: "Experiência Geral" },
+          { key: "agendamento_servico", label: "Agendamento" },
+          { key: "cumprimento_data_agendamento", label: "Cumprimento Agendamento" },
+          { key: "postura_profissional", label: "Postura Profissional" },
+        ];
+        // Como não temos as notas por dimensão nos comentários, usamos os motivos gerais proporcionalmente
+        const totalNeg = periodoAtual.comentariosNeg.length;
+        const parcNeg = comsNeg.length;
+        const fator = totalNeg > 0 ? parcNeg / totalNeg : 0;
+        return periodoAtual.motivos.map(m => ({
+          ...m,
+          count: Math.round(m.count * fator),
+        }));
+      })(),
+      comentariosNeg: periodoAtual.comentariosNeg.filter(c => c.transp === parceroFiltro),
+      comentariosPos: periodoAtual.comentariosPos.filter(c => c.transp === parceroFiltro),
+    };
+  }, [periodoAtual, parceroFiltro]);
+
   const tabs = [
     { id: "overview", label: "Visão Geral" },
     { id: "parceiros", label: "Por Parceiro" },
@@ -579,7 +622,7 @@ export default function App() {
               {["semana", "mes"].map(m => (
                 <button key={m} onClick={() => {
                   setModoPeriodo(m);
-                  setPeriodoSel(m === "semana" ? parsed.semanas[parsed.semanas.length - 1] : parsed.meses[parsed.meses.length - 1]);
+                  setPeriodoSelComReset(m === "semana" ? parsed.semanas[parsed.semanas.length - 1] : parsed.meses[parsed.meses.length - 1]);
                 }} style={{
                   padding: "6px 16px", borderRadius: 20, border: `1px solid ${modoPeriodo === m ? C.laranja : C.cinzaBorda}`,
                   background: modoPeriodo === m ? C.laranja : "transparent",
@@ -589,7 +632,7 @@ export default function App() {
               ))}
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginLeft: 8 }}>
                 {periodos.map(p => (
-                  <button key={p.val} onClick={() => setPeriodoSel(p.val)} style={{
+                  <button key={p.val} onClick={() => setPeriodoSelComReset(p.val)} style={{
                     padding: "5px 12px", borderRadius: 20,
                     border: `1px solid ${periodoSel === p.val ? C.laranja : C.cinzaBorda}`,
                     background: periodoSel === p.val ? C.laranjaLight : "transparent",
@@ -612,6 +655,22 @@ export default function App() {
                 }}>{t.label}</button>
               ))}
             </div>
+
+            {/* Filtro por parceiro — aparece nas abas Por Parceiro, Motivos e Comentários */}
+            {(tab === "parceiros" || tab === "motivos" || tab === "comentarios") && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: C.cinzaTexto, flexShrink: 0 }}>Filtrar parceiro:</span>
+                {parceirosDisponiveis.map(p => (
+                  <button key={p} onClick={() => setParceroFiltro(p)} style={{
+                    padding: "5px 12px", borderRadius: 20, fontSize: 12,
+                    border: `1px solid ${parceroFiltro === p ? C.laranja : C.cinzaBorda}`,
+                    background: parceroFiltro === p ? C.laranja : "transparent",
+                    color: parceroFiltro === p ? "#fff" : C.cinzaTexto,
+                    cursor: "pointer", fontWeight: parceroFiltro === p ? 700 : 400,
+                  }}>{p}</button>
+                ))}
+              </div>
+            )}
 
             {/* VISÃO GERAL */}
             {tab === "overview" && (
@@ -675,7 +734,7 @@ export default function App() {
             {/* POR PARCEIRO */}
             {tab === "parceiros" && (
               <Card>
-                <SecHead>CSAT por Parceiro — {periodoAtual.label} (meta 85%)</SecHead>
+                <SecHead>CSAT por Parceiro — {periodoFiltrado.label}{parceroFiltro !== "Todos" ? ` · ${parceroFiltro}` : ""} (meta 85%)</SecHead>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead><tr style={{ borderBottom: `2px solid ${C.cinzaBorda}` }}>
                     {["Parceiro","Share 4-5","Respostas","★1","★2","★3","★4","★5"].map(h => (
@@ -683,7 +742,7 @@ export default function App() {
                     ))}
                   </tr></thead>
                   <tbody>
-                    {periodoAtual.parceiros.map((p, i) => {
+                    {periodoFiltrado.parceiros.map((p, i) => {
                       const crit = p.share !== null && p.share < 0.85;
                       return (
                         <tr key={i} style={{ borderBottom: `1px solid ${C.cinzaBorda}`, background: crit ? C.vermelhoLight+"44" : "transparent" }}>
@@ -707,13 +766,13 @@ export default function App() {
             {/* MOTIVOS 1-3 */}
             {tab === "motivos" && (
               <Card>
-                <SecHead>Dimensões com mais notas 1-3 — {periodoAtual.label}</SecHead>
-                {periodoAtual.motivos.filter(m => m.count > 0).length === 0 ? (
+                <SecHead>Dimensões com mais notas 1-3 — {periodoFiltrado.label}{parceroFiltro !== "Todos" ? ` · ${parceroFiltro}` : ""}</SecHead>
+                {periodoFiltrado.motivos.filter(m => m.count > 0).length === 0 ? (
                   <p style={{ fontSize: 14, color: C.cinzaTexto }}>Nenhuma nota 1-3 neste período. 🎉</p>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {periodoAtual.motivos.map((m, i) => {
-                      const max = periodoAtual.motivos[0].count;
+                    {periodoFiltrado.motivos.map((m, i) => {
+                      const max = periodoFiltrado.motivos[0].count;
                       const w = max ? (m.count / max) * 100 : 0;
                       return (
                         <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -735,24 +794,24 @@ export default function App() {
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                   <Card>
-                    <SecHead>🔴 Comentários Negativos ({periodoAtual.comentariosNeg.length})</SecHead>
-                    {periodoAtual.comentariosNeg.length === 0
+                    <SecHead>🔴 Comentários Negativos ({periodoFiltrado.comentariosNeg.length})</SecHead>
+                    {periodoFiltrado.comentariosNeg.length === 0
                       ? <p style={{ fontSize: 13, color: C.cinzaTexto }}>Nenhum comentário negativo.</p>
-                      : <ComentariosList items={periodoAtual.comentariosNeg} />}
+                      : <ComentariosList items={periodoFiltrado.comentariosNeg} />}
                   </Card>
                   <Card>
-                    <SecHead>🟢 Comentários Positivos ({periodoAtual.comentariosPos.length})</SecHead>
-                    {periodoAtual.comentariosPos.length === 0
+                    <SecHead>🟢 Comentários Positivos ({periodoFiltrado.comentariosPos.length})</SecHead>
+                    {periodoFiltrado.comentariosPos.length === 0
                       ? <p style={{ fontSize: 13, color: C.cinzaTexto }}>Nenhum comentário positivo.</p>
-                      : <ComentariosList items={periodoAtual.comentariosPos} />}
+                      : <ComentariosList items={periodoFiltrado.comentariosPos} />}
                   </Card>
                 </div>
                 <Card>
-                  <SecHead>✨ Análise IA — {periodoAtual.label}</SecHead>
+                  <SecHead>✨ Análise IA — {periodoFiltrado.label}{parceroFiltro !== "Todos" ? ` · ${parceroFiltro}` : ""}</SecHead>
                   <AnaliseIA
-                    comentariosNeg={periodoAtual.comentariosNeg}
-                    comentariosPos={periodoAtual.comentariosPos}
-                    periodo={periodoAtual.semana || periodoAtual.mes}
+                    comentariosNeg={periodoFiltrado.comentariosNeg}
+                    comentariosPos={periodoFiltrado.comentariosPos}
+                    periodo={periodoFiltrado.semana || periodoFiltrado.mes}
                     tipo={modoPeriodo}
                   />
                 </Card>
