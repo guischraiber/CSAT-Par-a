@@ -7,6 +7,7 @@ const C = {
   verde: "#16A34A", verdeLight: "#BBF7D0",
   vermelho: "#DC2626", vermelhoLight: "#FEE2E2",
   amarelo: "#CA8A04", amareloLight: "#FEF08A",
+  azul: "#2563EB", azulLight: "#DBEAFE",
   cinzaFundo: "#F8F7F4", cinzaCard: "#FFFFFF",
   cinzaBorda: "#E5E3DF", cinzaTexto: "#6B7280", texto: "#1C1917",
 };
