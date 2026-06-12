@@ -651,10 +651,25 @@ export default function App() {
       </div>
 
       <div style={{ maxWidth: 1000, margin: "0 auto", padding: "28px 32px" }}>
-        {/* Upload */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
-          <UploadZone label="Base de Respostas CSAT" icon="📋" loaded={!!respostas} onFile={onRespostas} />
-          <UploadZone label="Base de Disparos CSAT" icon="📤" loaded={!!disparos} onFile={onDisparos} />
+        {/* Upload compacto */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20, padding: "8px 16px", background: C.cinzaCard, border: `1px solid ${C.cinzaBorda}`, borderRadius: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: C.cinzaTexto, flexShrink: 0 }}>Bases:</span>
+          {[
+            { label: "Respostas", loaded: !!respostas, onFile: onRespostas },
+            { label: "Disparos", loaded: !!disparos, onFile: onDisparos },
+          ].map((item, i) => (
+            <label key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 20, cursor: "pointer", border: `1px solid ${item.loaded ? C.verde : C.cinzaBorda}`, background: item.loaded ? C.verdeLight + "55" : C.cinzaFundo }}>
+              <span style={{ fontSize: 13 }}>{item.loaded ? "✅" : "📂"}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: item.loaded ? C.verde : C.cinzaTexto }}>{item.label}{item.loaded ? " ✓" : ""}</span>
+              <input type="file" accept=".csv" onChange={item.onFile} style={{ display: "none" }} />
+            </label>
+          ))}
+          {(!respostas || !disparos) && (
+            <span style={{ fontSize: 11, color: C.cinzaTexto, marginLeft: 4 }}>Suba os dois CSVs para carregar o dashboard</span>
+          )}
+          {respostas && disparos && (
+            <span style={{ fontSize: 11, color: C.verde, marginLeft: 4, fontWeight: 600 }}>✓ Prontos — clique em qualquer base para trocar</span>
+          )}
         </div>
 
         {!parsed && (
