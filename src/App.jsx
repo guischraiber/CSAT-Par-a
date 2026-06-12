@@ -436,6 +436,7 @@ export default function App() {
   const exportLink = useCallback(async () => {
     if (!parsed) return;
     setCopied("loading");
+    let url = null;
     try {
       const slim = {
         semanas: parsed.semanas,
@@ -444,20 +445,38 @@ export default function App() {
         porMes: parsed.porMes.map(p => p.slim),
       };
       const encoded = await encodeData(slim);
-      const url = `${window.location.origin}${window.location.pathname}?d=${encoded}`;
+      url = `${window.location.origin}${window.location.pathname}?d=${encoded}`;
       setLinkGerado(url);
-      try {
-        await navigator.clipboard.writeText(url);
-        setCopied("done");
-      } catch {
-        // Clipboard bloqueado — mostra o link para copiar manualmente
-        setCopied("manual");
-      }
     } catch (e) {
-      console.error(e);
+      console.error("Erro ao gerar link:", e);
       setCopied(false);
+      return;
     }
-    if (copied !== "manual") setTimeout(() => setCopied(false), 4000);
+    // Tentar copiar para clipboard
+    let copiou = false;
+    try {
+      await navigator.clipboard.writeText(url);
+      copiou = true;
+    } catch {
+      // Fallback: criar elemento temporário
+      try {
+        const el = document.createElement("textarea");
+        el.value = url;
+        el.style.position = "fixed";
+        el.style.opacity = "0";
+        document.body.appendChild(el);
+        el.focus();
+        el.select();
+        copiou = document.execCommand("copy");
+        document.body.removeChild(el);
+      } catch { copiou = false; }
+    }
+    if (copiou) {
+      setCopied("done");
+      setTimeout(() => setCopied(false), 4000);
+    } else {
+      setCopied("manual");
+    }
   }, [parsed]);
 
   // Período atual selecionado
