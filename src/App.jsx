@@ -137,6 +137,8 @@ function calcAgregado(resp, disp, label, semana, mes) {
     share, taxa, notas45,
     parceiros, motivos,
     comentariosNeg, comentariosPos,
+    // Versão slim para compartilhamento (sem comentários)
+    slim: { label, semana, mes, respostas: resp.length, disparos: disp.length, share, taxa, notas45, parceiros, motivos },
   };
 }
 
@@ -377,6 +379,7 @@ export default function App() {
   const [modoPeriodo, setModoPeriodo] = useState("semana");
   const [periodoSel, setPeriodoSel] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [linkGerado, setLinkGerado] = useState(null);
   const [fromURL, setFromURL] = useState(false);
 
   // Carregar dados da URL ao montar
@@ -386,7 +389,23 @@ export default function App() {
     if (d) {
       decodeData(d).then(decoded => {
         if (decoded) {
-          setParsed(decoded);
+          // Restaurar estrutura completa com comentários vazios
+          const restored = {
+            ...decoded,
+            porSemana: (decoded.porSemana || []).map(p => ({
+              ...p,
+              comentariosNeg: [],
+              comentariosPos: [],
+              slim: p,
+            })),
+            porMes: (decoded.porMes || []).map(p => ({
+              ...p,
+              comentariosNeg: [],
+              comentariosPos: [],
+              slim: p,
+            })),
+          };
+          setParsed(restored);
           setPeriodoSel(decoded.semanas?.[decoded.semanas.length - 1] || null);
           setFromURL(true);
         }
@@ -418,12 +437,27 @@ export default function App() {
     if (!parsed) return;
     setCopied("loading");
     try {
-      const encoded = await encodeData(parsed);
+      const slim = {
+        semanas: parsed.semanas,
+        meses: parsed.meses,
+        porSemana: parsed.porSemana.map(p => p.slim),
+        porMes: parsed.porMes.map(p => p.slim),
+      };
+      const encoded = await encodeData(slim);
       const url = `${window.location.origin}${window.location.pathname}?d=${encoded}`;
-      await navigator.clipboard.writeText(url);
-    } catch (e) { console.error(e); }
-    setCopied("done");
-    setTimeout(() => setCopied(false), 3000);
+      setLinkGerado(url);
+      try {
+        await navigator.clipboard.writeText(url);
+        setCopied("done");
+      } catch {
+        // Clipboard bloqueado — mostra o link para copiar manualmente
+        setCopied("manual");
+      }
+    } catch (e) {
+      console.error(e);
+      setCopied(false);
+    }
+    if (copied !== "manual") setTimeout(() => setCopied(false), 4000);
   }, [parsed]);
 
   // Período atual selecionado
@@ -469,7 +503,7 @@ export default function App() {
                 padding: "6px 14px", cursor: copied === "loading" ? "not-allowed" : "pointer",
                 color: "#fff", fontSize: 13, fontWeight: 600,
               }}>
-                {copied === "loading" ? "⏳ Gerando..." : copied === "done" ? "✓ Link copiado!" : "🔗 Compartilhar link"}
+                {copied === "loading" ? "⏳ Gerando..." : copied === "done" ? "✓ Link copiado!" : copied === "manual" ? "📋 Copie o link abaixo" : "🔗 Compartilhar link"}
               </button>
             )}
           </div>
@@ -496,6 +530,27 @@ export default function App() {
             {fromURL && (
               <div style={{ marginBottom: 16, padding: "10px 16px", background: "#DBEAFE", border: "1px solid #93C5FD", borderRadius: 8, fontSize: 13, color: "#1D4ED8", fontWeight: 500 }}>
                 📎 Dashboard compartilhado — {periodoAtual?.label}/2026. Suba os CSVs para atualizar.
+              </div>
+            )}
+
+            {/* Caixa de link para copiar manualmente */}
+            {linkGerado && copied === "manual" && (
+              <div style={{ marginBottom: 16, padding: "12px 16px", background: C.cinzaCard, border: `1px solid ${C.laranja}`, borderRadius: 8 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: C.laranja, marginBottom: 6 }}>📋 Copie o link abaixo (Ctrl+A → Ctrl+C):</p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    readOnly
+                    value={linkGerado}
+                    onFocus={e => e.target.select()}
+                    style={{ flex: 1, fontSize: 12, padding: "6px 10px", border: `1px solid ${C.cinzaBorda}`, borderRadius: 6, background: C.cinzaFundo, color: C.texto, fontFamily: "monospace" }}
+                  />
+                  <button onClick={() => { navigator.clipboard.writeText(linkGerado).then(() => { setCopied("done"); setTimeout(() => { setCopied(false); setLinkGerado(null); }, 2000); }); }} style={{ padding: "6px 12px", background: C.laranja, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                    Copiar
+                  </button>
+                  <button onClick={() => { setCopied(false); setLinkGerado(null); }} style={{ padding: "6px 10px", background: C.cinzaBorda, color: C.cinzaTexto, border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                    ✕
+                  </button>
+                </div>
               </div>
             )}
 
