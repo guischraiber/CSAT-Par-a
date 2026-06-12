@@ -382,6 +382,8 @@ export default function App() {
   const [linkGerado, setLinkGerado] = useState(null);
   const [fromURL, setFromURL] = useState(false);
   const [parceroFiltro, setParceroFiltro] = useState("Todos");
+  const [modoSelecao, setModoSelecao] = useState("unico"); // "unico" | "consolidar" | "comparar"
+  const [periodosMulti, setPeriodosMulti] = useState([]); // períodos selecionados no modo multi
 
   // Carregar dados da URL ao montar
   useEffect(() => {
@@ -483,9 +485,10 @@ export default function App() {
   // Período atual selecionado
   const periodoAtual = useMemo(() => {
     if (!parsed) return null;
+    if (modoSelecao === "consolidar" && periodoConsolidado) return periodoConsolidado;
     if (modoPeriodo === "semana") return parsed.porSemana.find(s => s.semana === periodoSel) || parsed.porSemana[parsed.porSemana.length - 1];
     return parsed.porMes.find(m => m.mes === periodoSel) || parsed.porMes[parsed.porMes.length - 1];
-  }, [parsed, modoPeriodo, periodoSel]);
+  }, [parsed, modoPeriodo, periodoSel, modoSelecao, periodoConsolidado]);
 
   // Lista de períodos para o seletor
   const periodos = useMemo(() => {
@@ -512,6 +515,79 @@ export default function App() {
     setPeriodoSel(val);
     setParceroFiltro("Todos");
   }, []);
+
+  // Toggle período no modo multi
+  const togglePeriodoMulti = useCallback((val) => {
+    setPeriodosMulti(prev => {
+      if (prev.includes(val)) return prev.filter(p => p !== val);
+      return [...prev, val].sort((a,b) => a-b);
+    });
+    setParceroFiltro("Todos");
+  }, []);
+
+  // Consolidar múltiplos períodos em um único agregado
+  const consolidarPeriodos = useCallback((lista, source) => {
+    if (!lista.length) return null;
+    const totalResp = lista.reduce((s, p) => s + p.respostas, 0);
+    const totalDisp = lista.reduce((s, p) => s + p.disparos, 0);
+    const totalN45 = lista.reduce((s, p) => s + p.notas45, 0);
+    const share = totalResp ? totalN45 / totalResp : null;
+    const taxa = totalDisp ? totalResp / totalDisp : null;
+
+    // Parceiros consolidados
+    const parcMap = {};
+    lista.forEach(p => {
+      p.parceiros.forEach(pa => {
+        if (!parcMap[pa.nome]) parcMap[pa.nome] = { nome: pa.nome, respostas: 0, disparos: 0, n45: 0, notas: [1,2,3,4,5].map(n => ({ nota: n, qtd: 0 })) };
+        parcMap[pa.nome].respostas += pa.respostas;
+        parcMap[pa.nome].disparos += pa.disparos;
+        parcMap[pa.nome].n45 += pa.notas.filter(n => n.nota >= 4).reduce((s,n) => s+n.qtd, 0);
+        pa.notas.forEach(n => { parcMap[pa.nome].notas.find(x => x.nota === n.nota).qtd += n.qtd; });
+      });
+    });
+    const parceiros = Object.values(parcMap).map(p => ({
+      ...p, share: p.respostas ? p.n45 / p.respostas : null,
+      taxa: p.disparos ? p.respostas / p.disparos : null,
+    })).sort((a,b) => (a.share??1)-(b.share??1));
+
+    // Motivos consolidados
+    const motivosMap = {};
+    lista.forEach(p => {
+      p.motivos.forEach(m => {
+        if (!motivosMap[m.label]) motivosMap[m.label] = { label: m.label, count: 0 };
+        motivosMap[m.label].count += m.count;
+      });
+    });
+    const motivos = Object.values(motivosMap).sort((a,b) => b.count-a.count);
+
+    // Comentários
+    const comentariosNeg = lista.flatMap(p => p.comentariosNeg || []);
+    const comentariosPos = lista.flatMap(p => p.comentariosPos || []);
+
+    const labels = lista.map(p => p.label).join(", ");
+    return {
+      label: labels, semana: null, mes: null,
+      respostas: totalResp, disparos: totalDisp, notas45: totalN45,
+      share, taxa, parceiros, motivos, comentariosNeg, comentariosPos,
+      slim: { label: labels, semana: null, mes: null, respostas: totalResp, disparos: totalDisp, notas45: totalN45, share, taxa, parceiros, motivos },
+    };
+  }, []);
+
+  // Período(s) ativos para exibição
+  const periodosAtivos = useMemo(() => {
+    if (!parsed) return [];
+    const source = modoPeriodo === "semana" ? parsed.porSemana : parsed.porMes;
+    if (modoSelecao === "unico") {
+      const p = source.find(s => (modoPeriodo === "semana" ? s.semana : s.mes) === periodoSel) || source[source.length-1];
+      return p ? [p] : [];
+    }
+    return source.filter(p => periodosMulti.includes(modoPeriodo === "semana" ? p.semana : p.mes));
+  }, [parsed, modoPeriodo, modoSelecao, periodoSel, periodosMulti]);
+
+  const periodoConsolidado = useMemo(() => {
+    if (modoSelecao !== "consolidar" || !periodosAtivos.length) return null;
+    return consolidarPeriodos(periodosAtivos);
+  }, [modoSelecao, periodosAtivos, consolidarPeriodos]);
 
   // Dados filtrados pelo parceiro selecionado
   const periodoFiltrado = useMemo(() => {
@@ -547,6 +623,7 @@ export default function App() {
     { id: "parceiros", label: "Por Parceiro" },
     { id: "motivos", label: "Motivos 1-3" },
     { id: "comentarios", label: "Comentários + IA" },
+    ...(modoSelecao === "comparar" ? [{ id: "comparar", label: "Comparação" }] : []),
   ];
 
   return (
@@ -616,30 +693,64 @@ export default function App() {
               </div>
             )}
 
-            {/* Seletor de período */}
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, padding: "14px 20px", background: C.cinzaCard, border: `1px solid ${C.cinzaBorda}`, borderRadius: 12 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: C.cinzaTexto }}>Visualizar por:</span>
-              {["semana", "mes"].map(m => (
-                <button key={m} onClick={() => {
-                  setModoPeriodo(m);
-                  setPeriodoSelComReset(m === "semana" ? parsed.semanas[parsed.semanas.length - 1] : parsed.meses[parsed.meses.length - 1]);
-                }} style={{
-                  padding: "6px 16px", borderRadius: 20, border: `1px solid ${modoPeriodo === m ? C.laranja : C.cinzaBorda}`,
-                  background: modoPeriodo === m ? C.laranja : "transparent",
-                  color: modoPeriodo === m ? "#fff" : C.cinzaTexto,
-                  cursor: "pointer", fontSize: 13, fontWeight: 600,
-                }}>{m === "semana" ? "Semana" : "Mês"}</button>
-              ))}
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginLeft: 8 }}>
-                {periodos.map(p => (
-                  <button key={p.val} onClick={() => setPeriodoSelComReset(p.val)} style={{
-                    padding: "5px 12px", borderRadius: 20,
-                    border: `1px solid ${periodoSel === p.val ? C.laranja : C.cinzaBorda}`,
-                    background: periodoSel === p.val ? C.laranjaLight : "transparent",
-                    color: periodoSel === p.val ? C.laranja : C.cinzaTexto,
-                    cursor: "pointer", fontSize: 12, fontWeight: periodoSel === p.val ? 700 : 400,
-                  }}>{p.label}</button>
+            {/* Seletor de período — sempre visível em todas as abas */}
+            <div style={{ marginBottom: 16, padding: "14px 20px", background: C.cinzaCard, border: `1px solid ${C.cinzaBorda}`, borderRadius: 12 }}>
+              {/* Linha 1: Semana/Mês + Modo */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: C.cinzaTexto, flexShrink: 0 }}>Ver por:</span>
+                {["semana", "mes"].map(m => (
+                  <button key={m} onClick={() => {
+                    setModoPeriodo(m);
+                    setPeriodosMulti([]);
+                    setPeriodoSelComReset(m === "semana" ? parsed.semanas[parsed.semanas.length - 1] : parsed.meses[parsed.meses.length - 1]);
+                  }} style={{
+                    padding: "4px 12px", borderRadius: 20, border: `1px solid ${modoPeriodo === m ? C.laranja : C.cinzaBorda}`,
+                    background: modoPeriodo === m ? C.laranja : "transparent",
+                    color: modoPeriodo === m ? "#fff" : C.cinzaTexto,
+                    cursor: "pointer", fontSize: 12, fontWeight: 600,
+                  }}>{m === "semana" ? "Semana" : "Mês"}</button>
                 ))}
+                <div style={{ width: 1, height: 18, background: C.cinzaBorda }} />
+                <span style={{ fontSize: 12, fontWeight: 600, color: C.cinzaTexto }}>Modo:</span>
+                {[
+                  { id: "unico", label: "Único" },
+                  { id: "consolidar", label: "Consolidar" },
+                  { id: "comparar", label: "Comparar" },
+                ].map(modo => (
+                  <button key={modo.id} onClick={() => { setModoSelecao(modo.id); setPeriodosMulti([]); }} style={{
+                    padding: "4px 12px", borderRadius: 20,
+                    border: `1px solid ${modoSelecao === modo.id ? C.azul : C.cinzaBorda}`,
+                    background: modoSelecao === modo.id ? "#DBEAFE" : "transparent",
+                    color: modoSelecao === modo.id ? C.azul : C.cinzaTexto,
+                    cursor: "pointer", fontSize: 12, fontWeight: modoSelecao === modo.id ? 700 : 400,
+                  }}>{modo.label}</button>
+                ))}
+                {modoSelecao !== "unico" && periodosMulti.length > 0 && (
+                  <span style={{ fontSize: 11, color: C.cinzaTexto, marginLeft: 4 }}>
+                    {periodosMulti.length} selecionado{periodosMulti.length > 1 ? "s" : ""}
+                    {modoSelecao === "consolidar" ? " — consolidado" : " — comparando"}
+                  </span>
+                )}
+              </div>
+              {/* Linha 2: Chips de período */}
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                {periodos.map(p => {
+                  const isUnico = modoSelecao === "unico" && periodoSel === p.val;
+                  const isMulti = modoSelecao !== "unico" && periodosMulti.includes(p.val);
+                  const ativo = isUnico || isMulti;
+                  return (
+                    <button key={p.val} onClick={() => {
+                      if (modoSelecao === "unico") setPeriodoSelComReset(p.val);
+                      else togglePeriodoMulti(p.val);
+                    }} style={{
+                      padding: "4px 10px", borderRadius: 20, fontSize: 11,
+                      border: `1px solid ${ativo ? C.laranja : C.cinzaBorda}`,
+                      background: ativo ? C.laranjaLight : "transparent",
+                      color: ativo ? C.laranja : C.cinzaTexto,
+                      cursor: "pointer", fontWeight: ativo ? 700 : 400,
+                    }}>{p.label}</button>
+                  );
+                })}
               </div>
             </div>
 
@@ -815,6 +926,131 @@ export default function App() {
                     tipo={modoPeriodo}
                   />
                 </Card>
+              </div>
+            )}
+            {/* COMPARAÇÃO */}
+            {tab === "comparar" && modoSelecao === "comparar" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                {periodosAtivos.length < 2 ? (
+                  <div style={{ textAlign: "center", padding: "40px", color: C.cinzaTexto }}>
+                    <div style={{ fontSize: 32, marginBottom: 12 }}>👆</div>
+                    <p style={{ fontSize: 14 }}>Selecione pelo menos 2 períodos para comparar</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* KPIs comparativos */}
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                        <thead>
+                          <tr style={{ borderBottom: `2px solid ${C.cinzaBorda}` }}>
+                            <th style={{ padding: "8px 14px", textAlign: "left", color: C.cinzaTexto, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Indicador</th>
+                            {periodosAtivos.map(p => (
+                              <th key={p.label} style={{ padding: "8px 14px", textAlign: "center", color: C.laranja, fontWeight: 700, fontSize: 12 }}>{p.label}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[
+                            { label: "Share 4-5", fn: p => pct(p.share), meta: 0.85, val: p => p.share },
+                            { label: "Taxa Resposta", fn: p => pct(p.taxa), val: p => p.taxa },
+                            { label: "Respostas", fn: p => p.respostas, val: p => p.respostas },
+                            { label: "Disparos", fn: p => p.disparos, val: p => p.disparos },
+                          ].map((row, ri) => {
+                            const vals = periodosAtivos.map(p => row.val(p));
+                            const max = Math.max(...vals.filter(v => v !== null));
+                            const min = Math.min(...vals.filter(v => v !== null));
+                            return (
+                              <tr key={ri} style={{ borderBottom: `1px solid ${C.cinzaBorda}` }}>
+                                <td style={{ padding: "9px 14px", fontWeight: 600, color: C.texto }}>{row.label}</td>
+                                {periodosAtivos.map((p, i) => {
+                                  const v = row.val(p);
+                                  const isBest = v === max && max !== min;
+                                  const isWorst = v === min && max !== min;
+                                  return (
+                                    <td key={i} style={{ padding: "9px 14px", textAlign: "center", fontWeight: isBest || isWorst ? 700 : 400, color: isBest ? C.verde : isWorst ? C.vermelho : C.texto, background: isBest ? C.verdeLight + "44" : isWorst ? C.vermelhoLight + "44" : "transparent" }}>
+                                      {row.fn(p)}
+                                      {isBest && <span style={{ fontSize: 10, marginLeft: 4 }}>▲</span>}
+                                      {isWorst && <span style={{ fontSize: 10, marginLeft: 4 }}>▼</span>}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Parceiros comparativos */}
+                    <Card>
+                      <SecHead>Share 4-5 por Parceiro — comparação</SecHead>
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                          <thead>
+                            <tr style={{ borderBottom: `2px solid ${C.cinzaBorda}` }}>
+                              <th style={{ padding: "7px 12px", textAlign: "left", color: C.cinzaTexto, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Parceiro</th>
+                              {periodosAtivos.map(p => (
+                                <th key={p.label} style={{ padding: "7px 12px", textAlign: "center", color: C.laranja, fontWeight: 700 }}>{p.label}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...new Set(periodosAtivos.flatMap(p => p.parceiros.map(pa => pa.nome)))].sort().map((nome, i) => (
+                              <tr key={i} style={{ borderBottom: `1px solid ${C.cinzaBorda}` }}>
+                                <td style={{ padding: "7px 12px", fontWeight: 600 }}>{nome}</td>
+                                {periodosAtivos.map((p, j) => {
+                                  const pa = p.parceiros.find(x => x.nome === nome);
+                                  const share = pa?.share ?? null;
+                                  const crit = share !== null && share < 0.85;
+                                  return (
+                                    <td key={j} style={{ padding: "7px 12px", textAlign: "center" }}>
+                                      {share !== null ? (
+                                        <span style={{ display: "inline-block", padding: "1px 8px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: crit ? C.vermelhoLight : C.verdeLight, color: crit ? C.vermelho : C.verde }}>{pct(share)}</span>
+                                      ) : <span style={{ color: C.cinzaBorda }}>—</span>}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </Card>
+
+                    {/* Motivos comparativos */}
+                    <Card>
+                      <SecHead>Motivos 1-3 — comparação</SecHead>
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                          <thead>
+                            <tr style={{ borderBottom: `2px solid ${C.cinzaBorda}` }}>
+                              <th style={{ padding: "7px 12px", textAlign: "left", color: C.cinzaTexto, fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>Dimensão</th>
+                              {periodosAtivos.map(p => (
+                                <th key={p.label} style={{ padding: "7px 12px", textAlign: "center", color: C.laranja, fontWeight: 700 }}>{p.label}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...new Set(periodosAtivos.flatMap(p => p.motivos.map(m => m.label)))].map((label, i) => (
+                              <tr key={i} style={{ borderBottom: `1px solid ${C.cinzaBorda}` }}>
+                                <td style={{ padding: "7px 12px", fontWeight: 600 }}>{label}</td>
+                                {periodosAtivos.map((p, j) => {
+                                  const m = p.motivos.find(x => x.label === label);
+                                  const count = m?.count ?? 0;
+                                  return (
+                                    <td key={j} style={{ padding: "7px 12px", textAlign: "center", color: count > 10 ? C.vermelho : count > 0 ? C.amarelo : C.cinzaTexto, fontWeight: count > 5 ? 700 : 400 }}>
+                                      {count}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </Card>
+                  </>
+                )}
               </div>
             )}
           </>
