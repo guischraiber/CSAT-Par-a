@@ -12,7 +12,7 @@ const C = {
   cinzaBorda: "#E5E3DF", cinzaTexto: "#6B7280", texto: "#1C1917",
 };
 
-const pct = (v) => typeof v === "number" ? (v * 100).toFixed(1) + "%" : "—";
+const pct = (v) => typeof v === "number" ? (v * 100).toFixed(2) + "%" : "—";
 
 const TRANSP_MAP = {
   "SAFARI MONTAGEM": "Safari", "MOVEL SERVICE": "Movel Service",
@@ -483,6 +483,15 @@ export default function App() {
     }
   }, [parsed]);
 
+  // Auto-switch para aba comparar quando modo muda para comparar
+  useEffect(() => {
+    if (modoSelecao === "comparar") {
+      setTab("comparar");
+    } else if (tab === "comparar") {
+      setTab("overview");
+    }
+  }, [modoSelecao]);
+
   // Lista de períodos para o seletor
   const periodos = useMemo(() => {
     if (!parsed) return [];
@@ -619,13 +628,16 @@ export default function App() {
     return ["Todos", ...nomes];
   }, [periodoAtual]);
 
-  const tabs = [
-    { id: "overview", label: "Visão Geral" },
-    { id: "parceiros", label: "Por Parceiro" },
-    { id: "motivos", label: "Motivos 1-3" },
-    { id: "comentarios", label: "Comentários + IA" },
-    ...(modoSelecao === "comparar" ? [{ id: "comparar", label: "Comparação" }] : []),
-  ];
+  const tabs = useMemo(() => {
+    const base = [
+      { id: "overview", label: "Visão Geral" },
+      { id: "parceiros", label: "Por Parceiro" },
+      { id: "motivos", label: "Motivos 1-3" },
+      { id: "comentarios", label: "Comentários + IA" },
+    ];
+    if (modoSelecao === "comparar") base.push({ id: "comparar", label: "⚡ Comparação" });
+    return base;
+  }, [modoSelecao]);
 
   return (
     <div style={{ minHeight: "100vh", background: C.cinzaFundo, fontFamily: "'Inter','Segoe UI',sans-serif", color: C.texto }}>
@@ -713,38 +725,45 @@ export default function App() {
             <div style={{ marginBottom: 16, padding: "14px 20px", background: C.cinzaCard, border: `1px solid ${C.cinzaBorda}`, borderRadius: 12 }}>
               {/* Linha 1: Semana/Mês + Modo */}
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: C.cinzaTexto, flexShrink: 0 }}>Ver por:</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: C.cinzaTexto, flexShrink: 0 }}>📅 Período:</span>
                 {["semana", "mes"].map(m => (
                   <button key={m} onClick={() => {
                     setModoPeriodo(m);
                     setPeriodosMulti([]);
                     setPeriodoSelComReset(m === "semana" ? parsed.semanas[parsed.semanas.length - 1] : parsed.meses[parsed.meses.length - 1]);
                   }} style={{
-                    padding: "4px 12px", borderRadius: 20, border: `1px solid ${modoPeriodo === m ? C.laranja : C.cinzaBorda}`,
+                    padding: "5px 14px", borderRadius: 20, border: `1px solid ${modoPeriodo === m ? C.laranja : C.cinzaBorda}`,
                     background: modoPeriodo === m ? C.laranja : "transparent",
                     color: modoPeriodo === m ? "#fff" : C.cinzaTexto,
                     cursor: "pointer", fontSize: 12, fontWeight: 600,
-                  }}>{m === "semana" ? "Semana" : "Mês"}</button>
+                  }}>{m === "semana" ? "📆 Semana" : "🗓️ Mês"}</button>
                 ))}
                 <div style={{ width: 1, height: 18, background: C.cinzaBorda }} />
-                <span style={{ fontSize: 12, fontWeight: 600, color: C.cinzaTexto }}>Modo:</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: C.cinzaTexto }}>👁️ Visualização:</span>
                 {[
-                  { id: "unico", label: "Único" },
+                  { id: "unico", label: "Individual" },
                   { id: "consolidar", label: "Consolidar" },
                   { id: "comparar", label: "Comparar" },
                 ].map(modo => (
                   <button key={modo.id} onClick={() => { setModoSelecao(modo.id); setPeriodosMulti([]); }} style={{
-                    padding: "4px 12px", borderRadius: 20,
+                    padding: "5px 14px", borderRadius: 20,
                     border: `1px solid ${modoSelecao === modo.id ? C.azul : C.cinzaBorda}`,
                     background: modoSelecao === modo.id ? "#DBEAFE" : "transparent",
                     color: modoSelecao === modo.id ? C.azul : C.cinzaTexto,
                     cursor: "pointer", fontSize: 12, fontWeight: modoSelecao === modo.id ? 700 : 400,
-                  }}>{modo.label}</button>
+                  }}>
+                    {modo.id === "unico" ? "👤 " : modo.id === "consolidar" ? "🔗 " : "⚡ "}{modo.label}
+                  </button>
                 ))}
                 {modoSelecao !== "unico" && periodosMulti.length > 0 && (
-                  <span style={{ fontSize: 11, color: C.cinzaTexto, marginLeft: 4 }}>
+                  <span style={{ fontSize: 11, color: C.cinzaTexto, marginLeft: 4, background: C.cinzaFundo, padding: "3px 10px", borderRadius: 20, border: `1px solid ${C.cinzaBorda}` }}>
                     {periodosMulti.length} selecionado{periodosMulti.length > 1 ? "s" : ""}
                     {modoSelecao === "consolidar" ? " — consolidado" : " — comparando"}
+                  </span>
+                )}
+                {modoSelecao !== "unico" && periodosMulti.length === 0 && (
+                  <span style={{ fontSize: 11, color: C.amarelo, marginLeft: 4 }}>
+                    ← Selecione os períodos abaixo
                   </span>
                 )}
               </div>
@@ -945,12 +964,14 @@ export default function App() {
               </div>
             )}
             {/* COMPARAÇÃO */}
-            {tab === "comparar" && modoSelecao === "comparar" && (
+            {tab === "comparar" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                 {periodosAtivos.length < 2 ? (
-                  <div style={{ textAlign: "center", padding: "40px", color: C.cinzaTexto }}>
-                    <div style={{ fontSize: 32, marginBottom: 12 }}>👆</div>
-                    <p style={{ fontSize: 14 }}>Selecione pelo menos 2 períodos para comparar</p>
+                  <div style={{ textAlign: "center", padding: "48px", color: C.cinzaTexto, background: C.cinzaCard, borderRadius: 12, border: `1px solid ${C.cinzaBorda}` }}>
+                    <div style={{ fontSize: 40, marginBottom: 12 }}>⚡</div>
+                    <p style={{ fontSize: 15, fontWeight: 600, color: C.texto, marginBottom: 6 }}>Modo Comparação</p>
+                    <p style={{ fontSize: 13, color: C.cinzaTexto }}>Selecione pelo menos <strong>2 períodos</strong> nos chips acima para comparar</p>
+                    <p style={{ fontSize: 12, color: C.cinzaTexto, marginTop: 8 }}>Você tem <strong>{periodosAtivos.length}</strong> período{periodosAtivos.length !== 1 ? "s" : ""} selecionado{periodosAtivos.length !== 1 ? "s" : ""}</p>
                   </div>
                 ) : (
                   <>
