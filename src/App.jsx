@@ -195,146 +195,6 @@ function ComentariosList({ items, cor, max = 200 }) {
   );
 }
 
-function AnaliseIA({ comentariosNeg, comentariosPos, periodo, tipo }) {
-  const [analise, setAnalise] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  const analyze = async () => {
-    setLoading(true);
-    setAnalise(null);
-    const listaNeg = comentariosNeg.map((c, i) => `${i+1}. [★${c.nota} - ${c.transp}${c.semana ? ` - W${c.semana}` : ""}] "${c.comentario}"`).join("\n") || "Nenhum.";
-    const listaPos = comentariosPos.slice(0, 30).map((c, i) => `${i+1}. [★${c.nota} - ${c.transp}] "${c.comentario}"`).join("\n") || "Nenhum.";
-    try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "anthropic-dangerous-direct-browser-ipc": "true",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 1500,
-          messages: [{ role: "user", content: `Você é analista de CX da MadeiraMadeira, área Gestão Parça (coleta reversa).
-
-Analise os comentários de ${tipo === "semana" ? "W" + periodo : "Mês " + periodo}/2026.
-
-NEGATIVOS (${comentariosNeg.length}):
-${listaNeg}
-
-POSITIVOS (${comentariosPos.length}, amostra 30):
-${listaPos}
-
-Responda SOMENTE JSON:
-{
-  "resumo": "3-4 frases resumindo o período",
-  "problemas": [{"tema": "nome", "frequencia": N, "descricao": "1 frase", "parceiros": [], "semanas": []}],
-  "pontos_positivos": [{"tema": "nome", "frequencia": N, "descricao": "1 frase", "parceiros": []}],
-  "parceiros_criticos": [],
-  "parceiros_destaque": [],
-  "acoes": [{"acao": "texto", "parceiro": "nome ou Geral", "urgencia": "Alta|Média|Baixa"}]
-}` }]
-        })
-      });
-      const data = await res.json();
-      const text = data.content?.[0]?.text || "";
-      setAnalise(JSON.parse(text.replace(/```json|```/g, "").trim()));
-    } catch { setAnalise({ erro: "Erro ao gerar análise. Tente novamente." }); }
-    setLoading(false);
-  };
-
-  return (
-    <div>
-      <button onClick={analyze} disabled={loading || (!comentariosNeg.length && !comentariosPos.length)} style={{
-        background: loading ? C.cinzaBorda : C.laranja, color: loading ? C.cinzaTexto : "#fff",
-        border: "none", borderRadius: 8, padding: "8px 16px", cursor: loading ? "not-allowed" : "pointer",
-        fontSize: 13, fontWeight: 600, marginBottom: analise ? 16 : 0,
-      }}>
-        {loading ? "⏳ Analisando..." : "✨ Analisar com IA"}
-      </button>
-
-      {analise && !analise.erro && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, padding: "14px 18px" }}>
-            <p style={{ fontSize: 11, fontWeight: 700, color: "#2563EB", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>✨ Resumo</p>
-            <p style={{ fontSize: 14, color: C.texto, lineHeight: 1.6 }}>{analise.resumo}</p>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            {analise.problemas?.length > 0 && (
-              <div>
-                <p style={{ fontSize: 11, fontWeight: 700, color: C.vermelho, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>🔴 Problemas</p>
-                {analise.problemas.map((p, i) => (
-                  <div key={i} style={{ padding: "10px 14px", background: C.vermelhoLight + "44", borderRadius: 8, borderLeft: `3px solid ${C.vermelho}`, marginBottom: 8 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ fontSize: 13, fontWeight: 700 }}>{p.tema}</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: C.vermelho }}>{p.frequencia}x</span>
-                    </div>
-                    <p style={{ fontSize: 12, color: C.cinzaTexto, margin: "3px 0" }}>{p.descricao}</p>
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
-                      {p.parceiros?.map((pa, j) => <span key={j} style={{ fontSize: 10, background: C.laranjaLight, color: C.laranja, borderRadius: 20, padding: "1px 8px", fontWeight: 600 }}>{pa}</span>)}
-                      {p.semanas?.map((s, j) => <span key={`s${j}`} style={{ fontSize: 10, background: C.cinzaBorda, color: C.cinzaTexto, borderRadius: 20, padding: "1px 8px" }}>{s}</span>)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {analise.pontos_positivos?.length > 0 && (
-              <div>
-                <p style={{ fontSize: 11, fontWeight: 700, color: C.verde, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>🟢 Pontos Positivos</p>
-                {analise.pontos_positivos.map((p, i) => (
-                  <div key={i} style={{ padding: "10px 14px", background: C.verdeLight + "44", borderRadius: 8, borderLeft: `3px solid ${C.verde}`, marginBottom: 8 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ fontSize: 13, fontWeight: 700 }}>{p.tema}</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: C.verde }}>{p.frequencia}x</span>
-                    </div>
-                    <p style={{ fontSize: 12, color: C.cinzaTexto, margin: "3px 0" }}>{p.descricao}</p>
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
-                      {p.parceiros?.map((pa, j) => <span key={j} style={{ fontSize: 10, background: C.verdeLight, color: C.verde, borderRadius: 20, padding: "1px 8px", fontWeight: 600 }}>{pa}</span>)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            {analise.parceiros_criticos?.length > 0 && (
-              <div style={{ padding: "12px 16px", background: C.vermelhoLight, borderRadius: 8 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: C.vermelho, marginBottom: 8 }}>⚠️ Parceiros Críticos</p>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {analise.parceiros_criticos.map((p, i) => <span key={i} style={{ fontSize: 12, fontWeight: 600, background: "#fff", color: C.vermelho, borderRadius: 20, padding: "2px 10px", border: `1px solid ${C.vermelho}` }}>{p}</span>)}
-                </div>
-              </div>
-            )}
-            {analise.parceiros_destaque?.length > 0 && (
-              <div style={{ padding: "12px 16px", background: C.verdeLight, borderRadius: 8 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: C.verde, marginBottom: 8 }}>⭐ Parceiros Destaque</p>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {analise.parceiros_destaque.map((p, i) => <span key={i} style={{ fontSize: 12, fontWeight: 600, background: "#fff", color: C.verde, borderRadius: 20, padding: "2px 10px", border: `1px solid ${C.verde}` }}>{p}</span>)}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {analise.acoes?.length > 0 && (
-            <div>
-              <p style={{ fontSize: 11, fontWeight: 700, color: C.cinzaTexto, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>🎯 Ações Sugeridas</p>
-              {analise.acoes.map((a, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 8, border: `1px solid ${a.urgencia === "Alta" ? C.vermelho : a.urgencia === "Média" ? C.amarelo : C.cinzaBorda}`, background: a.urgencia === "Alta" ? C.vermelhoLight : a.urgencia === "Média" ? C.amareloLight : C.cinzaFundo, marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: a.urgencia === "Alta" ? C.vermelho : a.urgencia === "Média" ? C.amarelo : C.cinzaTexto, width: 40, flexShrink: 0 }}>{a.urgencia}</span>
-                  <span style={{ fontSize: 11, color: C.laranja, fontWeight: 600, width: 100, flexShrink: 0 }}>{a.parceiro}</span>
-                  <span style={{ fontSize: 13, color: C.texto }}>{a.acao}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      {analise?.erro && <div style={{ marginTop: 12, padding: "12px 16px", background: C.vermelhoLight, borderRadius: 8, fontSize: 13, color: C.vermelho }}>{analise.erro}</div>}
-    </div>
-  );
-}
-
 // ── Upload Zone ───────────────────────────────────────────────────────────────
 function UploadZone({ label, icon, loaded, onFile }) {
   return (
@@ -636,7 +496,7 @@ export default function App() {
       { id: "overview", label: "Visão Geral" },
       { id: "parceiros", label: "Por Parceiro" },
       { id: "motivos", label: "Motivos 1-3" },
-      { id: "comentarios", label: "Comentários + IA" },
+      { id: "comentarios", label: "Comentários" },
     ];
     if (modoSelecao === "comparar") base.push({ id: "comparar", label: "⚡ Comparação" });
     return base;
@@ -938,9 +798,104 @@ export default function App() {
               </Card>
             )}
 
-            {/* COMENTÁRIOS + IA */}
+            {/* COMENTÁRIOS */}
             {tab === "comentarios" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+                {/* Resumo de críticas */}
+                {periodoFiltrado.comentariosNeg.length > 0 && (() => {
+                  // Agrupar críticas por palavras-chave nos comentários
+                  const temas = [
+                    { label: "Atraso / Não compareceu", palavras: ["atraso", "atrasou", "não veio", "nao veio", "não apareceu", "nao apareceu", "não compareceu", "nao compareceu", "desmarcou", "cancelou"] },
+                    { label: "Reagendamento / Demora", palavras: ["reagend", "remarc", "demora", "demorou", "espera", "dias"] },
+                    { label: "Comunicação / Contato", palavras: ["ligo", "ligou", "não liga", "nao liga", "contato", "whatsapp", "mensagem", "comunicação", "avisar", "avisou"] },
+                    { label: "Postura / Atendimento", palavras: ["grosso", "grosseria", "mal educado", "maleducado", "rude", "desrespeit", "postura", "atendimento ruim"] },
+                    { label: "Coleta não realizada", palavras: ["não coletou", "nao coletou", "não pegou", "nao pegou", "não retirou", "nao retirou", "não buscou", "nao buscou"] },
+                    { label: "Produto danificado", palavras: ["danificou", "quebrou", "amassou", "arranhado", "dano", "estrago"] },
+                  ];
+
+                  const temasContagem = temas.map(t => {
+                    const matches = periodoFiltrado.comentariosNeg.filter(c =>
+                      t.palavras.some(p => c.comentario.toLowerCase().includes(p))
+                    );
+                    return { label: t.label, count: matches.length, parceiros: [...new Set(matches.map(c => c.transp))] };
+                  }).filter(t => t.count > 0).sort((a, b) => b.count - a.count);
+
+                  // Resumo por parceiro
+                  const parceirosComCriticas = [...new Set(periodoFiltrado.comentariosNeg.map(c => c.transp))].map(nome => {
+                    const coms = periodoFiltrado.comentariosNeg.filter(c => c.transp === nome);
+                    const totalParceiro = (periodoFiltrado.parceiros.find(p => p.nome === nome)?.respostas) || coms.length;
+                    return { nome, criticas: coms.length, pct: totalParceiro ? ((coms.length / totalParceiro) * 100).toFixed(1) : "—" };
+                  }).sort((a, b) => b.criticas - a.criticas);
+
+                  return (
+                    <>
+                      {/* Card resumo geral */}
+                      <Card>
+                        <SecHead>📋 Resumo de Críticas — {periodoFiltrado.label}{parceroFiltro !== "Todos" ? ` · ${parceroFiltro}` : ""}</SecHead>
+                        <div style={{ display: "flex", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
+                          <div style={{ padding: "10px 18px", background: C.vermelhoLight, borderRadius: 8, textAlign: "center" }}>
+                            <div style={{ fontSize: 24, fontWeight: 700, color: C.vermelho }}>{periodoFiltrado.comentariosNeg.length}</div>
+                            <div style={{ fontSize: 11, color: C.cinzaTexto, fontWeight: 600 }}>Críticas (notas 1-3)</div>
+                          </div>
+                          <div style={{ padding: "10px 18px", background: C.verdeLight, borderRadius: 8, textAlign: "center" }}>
+                            <div style={{ fontSize: 24, fontWeight: 700, color: C.verde }}>{periodoFiltrado.comentariosPos.length}</div>
+                            <div style={{ fontSize: 11, color: C.cinzaTexto, fontWeight: 600 }}>Elogios (notas 4-5)</div>
+                          </div>
+                          {periodoFiltrado.respostas > 0 && (
+                            <div style={{ padding: "10px 18px", background: C.amareloLight, borderRadius: 8, textAlign: "center" }}>
+                              <div style={{ fontSize: 24, fontWeight: 700, color: C.amarelo }}>
+                                {((periodoFiltrado.comentariosNeg.length / periodoFiltrado.respostas) * 100).toFixed(1)}%
+                              </div>
+                              <div style={{ fontSize: 11, color: C.cinzaTexto, fontWeight: 600 }}>das respostas são críticas</div>
+                            </div>
+                          )}
+                        </div>
+
+                        {temasContagem.length > 0 && (
+                          <>
+                            <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: C.cinzaTexto, marginBottom: 10 }}>🔍 Principais Temas Críticos</p>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                              {temasContagem.map((t, i) => (
+                                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                  <span style={{ fontSize: 12, fontWeight: 600, width: 220, flexShrink: 0 }}>{t.label}</span>
+                                  <div style={{ flex: 1, background: C.cinzaBorda, borderRadius: 4, height: 18, position: "relative" }}>
+                                    <div style={{ width: `${(t.count / temasContagem[0].count) * 100}%`, background: i === 0 ? C.vermelho : C.amarelo, height: "100%", borderRadius: 4 }} />
+                                  </div>
+                                  <span style={{ fontSize: 12, fontWeight: 700, color: i === 0 ? C.vermelho : C.amarelo, width: 28, textAlign: "right" }}>{t.count}</span>
+                                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", minWidth: 0 }}>
+                                    {t.parceiros.slice(0, 3).map((p, j) => (
+                                      <span key={j} style={{ fontSize: 10, background: C.laranjaLight, color: C.laranja, borderRadius: 20, padding: "1px 7px", fontWeight: 600, whiteSpace: "nowrap" }}>{p}</span>
+                                    ))}
+                                    {t.parceiros.length > 3 && <span style={{ fontSize: 10, color: C.cinzaTexto }}>+{t.parceiros.length - 3}</span>}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </Card>
+
+                      {/* Resumo por parceiro */}
+                      {parceroFiltro === "Todos" && parceirosComCriticas.length > 0 && (
+                        <Card>
+                          <SecHead>⚠️ Críticas por Parceiro — {periodoFiltrado.label}</SecHead>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {parceirosComCriticas.map((p, i) => (
+                              <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", borderRadius: 8, background: i === 0 ? C.vermelhoLight + "55" : C.cinzaFundo, border: `1px solid ${i === 0 ? C.vermelho + "44" : C.cinzaBorda}` }}>
+                                <span style={{ fontSize: 13, fontWeight: 700, flex: 1 }}>{p.nome}</span>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: C.vermelho, background: C.vermelhoLight, borderRadius: 20, padding: "2px 10px" }}>{p.criticas} crítica{p.criticas !== 1 ? "s" : ""}</span>
+                                <span style={{ fontSize: 12, color: C.cinzaTexto, width: 60, textAlign: "right" }}>{p.pct}% das resp.</span>
+                              </div>
+                            ))}
+                          </div>
+                        </Card>
+                      )}
+                    </>
+                  );
+                })()}
+
+                {/* Listas de comentários */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                   <Card>
                     <SecHead>🔴 Comentários Negativos ({periodoFiltrado.comentariosNeg.length})</SecHead>
@@ -955,15 +910,6 @@ export default function App() {
                       : <ComentariosList items={periodoFiltrado.comentariosPos} />}
                   </Card>
                 </div>
-                <Card>
-                  <SecHead>✨ Análise IA — {periodoFiltrado.label}{parceroFiltro !== "Todos" ? ` · ${parceroFiltro}` : ""}</SecHead>
-                  <AnaliseIA
-                    comentariosNeg={periodoFiltrado.comentariosNeg}
-                    comentariosPos={periodoFiltrado.comentariosPos}
-                    periodo={periodoFiltrado.semana || periodoFiltrado.mes}
-                    tipo={modoPeriodo}
-                  />
-                </Card>
               </div>
             )}
             {/* COMPARAÇÃO */}
