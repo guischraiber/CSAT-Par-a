@@ -39,8 +39,24 @@ function getISOWeek(d) {
   return Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7);
 }
 
+// ── localStorage — semanas travadas ──────────────────────────────────────────
+const STORAGE_KEY = "csat_semanas_travadas";
+
+function carregarSemanasTravadas() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {}; // { "2026_W10": {...agregado} }
+  } catch { return {}; }
+}
+
+function salvarSemanasTravadas(travadas) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(travadas)); } catch {}
+}
+
+function chaveWeek(ano, semana) { return `${ano}_W${semana}`; }
+
 // ── Parser principal ──────────────────────────────────────────────────────────
-function parseData(respostas, disparos) {
+function parseData(respostas, disparos, semanasTravadas = {}) {
   // Detectar anos disponíveis nos dados
   const anosResp = [...new Set(respostas.map(r => parseInt(r["Ano Resposta"])).filter(a => !isNaN(a)))].sort();
   const anoAtual = anosResp.length ? anosResp[anosResp.length - 1] : new Date().getFullYear();
@@ -72,29 +88,53 @@ function parseData(respostas, disparos) {
   const semanaSet = [...new Set(respEnrich.map(r => r.semana))].sort((a,b) => a-b);
   const mesSet = [...new Set(respEnrich.map(r => r.mes))].sort((a,b) => a-b);
 
-  const semanas = semanaSet.filter(w => {
-    const cnt = respEnrich.filter(r => r.semana === w).length;
-    if (cnt < 20) return false;
-    return true;
-  });
-  // Última semana fica disponível mas marcada como "em andamento" se < 10 respostas
-  // Adicionar última semana do CSV se tiver entre 1 e 19 respostas (para mostrar no seletor travado)
+  // Semanas com >= 20 respostas no CSV atual
+  const semanasNovas = semanaSet.filter(w => respEnrich.filter(r => r.semana === w).length >= 20);
+
+  // Última semana em andamento (< 10 respostas)
   const ultimaSemanaRaw = semanaSet[semanaSet.length - 1];
   const ultimaSemanaResp = ultimaSemanaRaw ? respEnrich.filter(r => r.semana === ultimaSemanaRaw).length : 0;
-  const ultimaSemanaEmAndamento = ultimaSemanaRaw && !semanas.includes(ultimaSemanaRaw) && ultimaSemanaResp > 0;
+  const ultimaSemanaEmAndamento = ultimaSemanaRaw && !semanasNovas.includes(ultimaSemanaRaw) && ultimaSemanaResp > 0;
   if (ultimaSemanaEmAndamento && ultimaSemanaResp >= 10) {
-    semanas.push(ultimaSemanaRaw);
+    semanasNovas.push(ultimaSemanaRaw);
   }
-  const meses = mesSet.filter(m => {
-    return respEnrich.filter(r => r.mes === m).length >= 20;
+
+  // Calcular agregados do CSV para semanas novas — salvar as que atingiram >= 20
+  const novasTravadas = { ...semanasTravadas };
+  semanasNovas.forEach(w => {
+    const chave = chaveWeek(anoAtual, w);
+    const respW = respEnrich.filter(r => r.semana === w);
+    const dispW = dispEnrich.filter(r => r.semana === w);
+    const totalResp = respW.length;
+    if (totalResp >= 20 && !novasTravadas[chave]) {
+      // Travar esta semana pela primeira vez
+      novasTravadas[chave] = calcAgregado(respW, dispW, `W${w}`, w, null);
+    }
+  });
+  salvarSemanasTravadas(novasTravadas);
+
+  // Unir semanas travadas + semanas novas ainda não travadas
+  const todasSemanas = [...new Set([
+    ...Object.keys(novasTravadas)
+      .filter(k => k.startsWith(`${anoAtual}_W`))
+      .map(k => parseInt(k.split("_W")[1])),
+    ...semanasNovas,
+  ])].sort((a, b) => a - b);
+
+  const semanas = todasSemanas;
+
+  // Calcular porSemana: usar travado se disponível, senão calcular do CSV
+  const porSemana = semanas.map(w => {
+    const chave = chaveWeek(anoAtual, w);
+    if (novasTravadas[chave]) return novasTravadas[chave];
+    return calcAgregado(
+      respEnrich.filter(r => r.semana === w),
+      dispEnrich.filter(r => r.semana === w),
+      `W${w}`, w, null
+    );
   });
 
-  // Calcular agregado por semana
-  const porSemana = semanas.map(w => calcAgregado(
-    respEnrich.filter(r => r.semana === w),
-    dispEnrich.filter(r => r.semana === w),
-    `W${w}`, w, null
-  ));
+  const meses = mesSet.filter(m => respEnrich.filter(r => r.mes === m).length >= 20);
 
   // Calcular agregado por mês
   const porMes = meses.map(m => calcAgregado(
@@ -103,7 +143,9 @@ function parseData(respostas, disparos) {
     `M${m}`, null, m
   ));
 
-  return { respEnrich, dispEnrich, porSemana, porMes, semanas, meses, ultimaSemanaEmAndamento, ultimaSemanaRaw, ultimaSemanaResp };
+  const semanasTravadasCount = Object.keys(novasTravadas).filter(k => k.startsWith(`${anoAtual}_W`)).length;
+
+  return { respEnrich, dispEnrich, porSemana, porMes, semanas, meses, ultimaSemanaEmAndamento, ultimaSemanaRaw, ultimaSemanaResp, semanasTravadasCount };
 }
 
 function calcAgregado(resp, disp, label, semana, mes) {
@@ -302,7 +344,8 @@ export default function App() {
 
   const calcular = useCallback((resp, disp) => {
     if (resp && disp) {
-      const result = parseData(resp, disp);
+      const semanasTravadas = carregarSemanasTravadas();
+      const result = parseData(resp, disp, semanasTravadas);
       setParsed(result);
       setPeriodoSel(result.semanas[result.semanas.length - 1] || null);
       setFromURL(false);
@@ -558,6 +601,12 @@ export default function App() {
           )}
           {respostas && disparos && (
             <span style={{ fontSize: 11, color: C.verde, marginLeft: 4, fontWeight: 600 }}>✓ Prontos — clique em qualquer base para trocar</span>
+          )}
+          {parsed && parsed.semanasTravadasCount > 0 && (
+            <span style={{ fontSize: 11, color: C.azul, marginLeft: "auto", background: C.azulLight, borderRadius: 20, padding: "3px 10px", fontWeight: 600 }}>
+              🔒 {parsed.semanasTravadasCount} semana{parsed.semanasTravadasCount !== 1 ? "s" : ""} travada{parsed.semanasTravadasCount !== 1 ? "s" : ""}
+              <button onClick={() => { if (window.confirm("Apagar todas as semanas travadas? Os dados serão recalculados do CSV.")) { localStorage.removeItem(STORAGE_KEY); calcular(respostas, disparos); } }} style={{ marginLeft: 8, fontSize: 10, color: C.vermelho, background: "none", border: "none", cursor: "pointer", fontWeight: 700, padding: 0 }}>✕ limpar</button>
+            </span>
           )}
         </div>
 
