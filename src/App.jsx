@@ -41,6 +41,10 @@ function getISOWeek(d) {
 
 // ── Parser principal ──────────────────────────────────────────────────────────
 function parseData(respostas, disparos) {
+  // Detectar anos disponíveis nos dados
+  const anosResp = [...new Set(respostas.map(r => parseInt(r["Ano Resposta"])).filter(a => !isNaN(a)))].sort();
+  const anoAtual = anosResp.length ? anosResp[anosResp.length - 1] : new Date().getFullYear();
+
   // Enriquecer respostas
   const respEnrich = respostas.map(r => ({
     ...r,
@@ -50,7 +54,7 @@ function parseData(respostas, disparos) {
     nota: parseInt(r["experiencia_geral"]),
     transp: normTransp(r["TRANSPORTADORA"]),
     comentario: r["comentario_aberto"]?.trim() || "",
-  })).filter(r => !isNaN(r.semana) && !isNaN(r.nota) && r.ano === 2026);
+  })).filter(r => !isNaN(r.semana) && !isNaN(r.nota) && r.ano === anoAtual);
 
   // Enriquecer disparos
   const dispEnrich = disparos.map(r => {
@@ -62,7 +66,7 @@ function parseData(respostas, disparos) {
       ano: d.getFullYear(),
       transp: normTransp(r["Transportadora"]),
     };
-  }).filter(r => r && r.ano === 2026);
+  }).filter(r => r && r.ano === anoAtual);
 
   // Semanas e meses disponíveis com >= 20 respostas
   const semanaSet = [...new Set(respEnrich.map(r => r.semana))].sort((a,b) => a-b);
@@ -186,7 +190,7 @@ function ComentariosList({ items, cor, max = 200 }) {
   const show = expanded ? items : items.slice(0, 5);
   return (
     <div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: max, overflowY: expanded ? "auto" : "hidden" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: expanded ? "none" : max, overflowY: expanded ? "visible" : "auto" }}>
         {show.map((c, i) => (
           <div key={i} style={{ display: "flex", gap: 10, padding: "9px 12px", background: C.cinzaFundo, borderRadius: 8, borderLeft: `3px solid ${c.nota <= 1 ? C.vermelho : c.nota <= 3 ? C.amarelo : C.verde}` }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: c.nota <= 1 ? C.vermelho : c.nota <= 3 ? C.amarelo : C.verde, flexShrink: 0 }}>★{c.nota}</span>
