@@ -82,7 +82,7 @@ function parseData(respostas, disparos, semanasTravadas = {}) {
       ano: d.getFullYear(),
       transp: normTransp(r["Transportadora"]),
     };
-  }).filter(r => r && r.ano === anoAtual);
+  }).filter(r => r !== null);
 
   // Semanas e meses disponíveis com >= 20 respostas
   const semanaSet = [...new Set(respEnrich.map(r => r.semana))].sort((a,b) => a-b);
@@ -302,8 +302,9 @@ export default function App() {
   const [linkGerado, setLinkGerado] = useState(null);
   const [fromURL, setFromURL] = useState(false);
   const [parceroFiltro, setParceroFiltro] = useState("Todos");
-  const [modoSelecao, setModoSelecao] = useState("unico"); // "unico" | "consolidar" | "comparar"
-  const [periodosMulti, setPeriodosMulti] = useState([]); // períodos selecionados no modo multi
+  const [modoSelecao, setModoSelecao] = useState("unico");
+  const [periodosMulti, setPeriodosMulti] = useState([]);
+  const [arquivosInfo, setArquivosInfo] = useState({ respostas: null, disparos: null });
 
   // Carregar dados da URL ao montar
   useEffect(() => {
@@ -352,10 +353,15 @@ export default function App() {
     }
   }, []);
 
-  const loadCSV = useCallback((setter, onDone) => (e) => {
+  const loadCSV = useCallback((setter, tipo, onDone) => (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    Papa.parse(file, { header: true, skipEmptyLines: true, complete: ({ data }) => { setter(data); if (onDone) onDone(data); } });
+    const agora = new Date().toLocaleString("pt-BR");
+    Papa.parse(file, { header: true, skipEmptyLines: true, complete: ({ data }) => {
+      setter(data);
+      setArquivosInfo(prev => ({ ...prev, [tipo]: { nome: file.name, linhas: data.length, data: agora } }));
+      if (onDone) onDone(data);
+    }});
   }, []);
 
   const calcular = useCallback((resp, disp) => {
@@ -369,8 +375,8 @@ export default function App() {
     }
   }, []);
 
-  const onRespostas = loadCSV(setRespostas, (d) => calcular(d, disparos));
-  const onDisparos = loadCSV(setDisparos, (d) => calcular(respostas, d));
+  const onRespostas = loadCSV(setRespostas, "respostas", (d) => calcular(d, disparos));
+  const onDisparos = loadCSV(setDisparos, "disparos", (d) => calcular(respostas, d));
 
   // Exportar link comprimido — inclui todas as semanas travadas
   const exportLink = useCallback(async () => {
@@ -601,29 +607,54 @@ export default function App() {
 
       <div style={{ maxWidth: 1000, margin: "0 auto", padding: "28px 32px" }}>
         {/* Upload compacto */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20, padding: "8px 16px", background: C.cinzaCard, border: `1px solid ${C.cinzaBorda}`, borderRadius: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: C.cinzaTexto, flexShrink: 0 }}>Bases:</span>
-          {[
-            { label: "Respostas", loaded: !!respostas, onFile: onRespostas },
-            { label: "Disparos", loaded: !!disparos, onFile: onDisparos },
-          ].map((item, i) => (
-            <label key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 20, cursor: "pointer", border: `1px solid ${item.loaded ? C.verde : C.cinzaBorda}`, background: item.loaded ? C.verdeLight + "55" : C.cinzaFundo }}>
-              <span style={{ fontSize: 13 }}>{item.loaded ? "✅" : "📂"}</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: item.loaded ? C.verde : C.cinzaTexto }}>{item.label}{item.loaded ? " ✓" : ""}</span>
-              <input type="file" accept=".csv" onChange={item.onFile} style={{ display: "none" }} />
-            </label>
-          ))}
-          {(!respostas || !disparos) && (
-            <span style={{ fontSize: 11, color: C.cinzaTexto, marginLeft: 4 }}>Suba os dois CSVs para carregar o dashboard</span>
-          )}
-          {respostas && disparos && (
-            <span style={{ fontSize: 11, color: C.verde, marginLeft: 4, fontWeight: 600 }}>✓ Prontos — clique em qualquer base para trocar</span>
-          )}
-          {parsed && parsed.semanasTravadasCount > 0 && (
-            <span style={{ fontSize: 11, color: C.azul, marginLeft: "auto", background: C.azulLight, borderRadius: 20, padding: "3px 10px", fontWeight: 600 }}>
-              🔒 {parsed.semanasTravadasCount} semana{parsed.semanasTravadasCount !== 1 ? "s" : ""} travada{parsed.semanasTravadasCount !== 1 ? "s" : ""}
-              <button onClick={() => { if (window.confirm("Apagar todas as semanas travadas? Os dados serão recalculados do CSV.")) { localStorage.removeItem(STORAGE_KEY); calcular(respostas, disparos); } }} style={{ marginLeft: 8, fontSize: 10, color: C.vermelho, background: "none", border: "none", cursor: "pointer", fontWeight: 700, padding: 0 }}>✕ limpar</button>
-            </span>
+        <div style={{ marginBottom: 20, background: C.cinzaCard, border: `1px solid ${C.cinzaBorda}`, borderRadius: 10, overflow: "hidden" }}>
+          {/* Linha principal */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: C.cinzaTexto, flexShrink: 0 }}>Bases:</span>
+            {[
+              { label: "Respostas", tipo: "respostas", loaded: !!respostas, onFile: onRespostas },
+              { label: "Disparos", tipo: "disparos", loaded: !!disparos, onFile: onDisparos },
+            ].map((item, i) => (
+              <label key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 20, cursor: "pointer", border: `1px solid ${item.loaded ? C.verde : C.cinzaBorda}`, background: item.loaded ? C.verdeLight + "55" : C.cinzaFundo }}>
+                <span style={{ fontSize: 13 }}>{item.loaded ? "✅" : "📂"}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: item.loaded ? C.verde : C.cinzaTexto }}>{item.label}{item.loaded ? " ✓" : ""}</span>
+                <input type="file" accept=".csv" onChange={item.onFile} style={{ display: "none" }} />
+              </label>
+            ))}
+            {(!respostas || !disparos) && (
+              <span style={{ fontSize: 11, color: C.cinzaTexto, marginLeft: 4 }}>Suba os dois CSVs para carregar o dashboard</span>
+            )}
+            {respostas && disparos && (
+              <span style={{ fontSize: 11, color: C.verde, marginLeft: 4, fontWeight: 600 }}>✓ Prontos — clique em qualquer base para trocar</span>
+            )}
+            {parsed && parsed.semanasTravadasCount > 0 && (
+              <span style={{ fontSize: 11, color: C.azul, marginLeft: "auto", background: C.azulLight, borderRadius: 20, padding: "3px 10px", fontWeight: 600 }}>
+                🔒 {parsed.semanasTravadasCount} semana{parsed.semanasTravadasCount !== 1 ? "s" : ""} travada{parsed.semanasTravadasCount !== 1 ? "s" : ""}
+                <button onClick={() => { if (window.confirm("Apagar todas as semanas travadas? Os dados serão recalculados do CSV.")) { localStorage.removeItem(STORAGE_KEY); calcular(respostas, disparos); } }} style={{ marginLeft: 8, fontSize: 10, color: C.vermelho, background: "none", border: "none", cursor: "pointer", fontWeight: 700, padding: 0 }}>✕ limpar</button>
+              </span>
+            )}
+          </div>
+          {/* Linha de info dos arquivos */}
+          {(arquivosInfo.respostas || arquivosInfo.disparos) && (
+            <div style={{ display: "flex", gap: 16, padding: "6px 16px 8px", borderTop: `1px solid ${C.cinzaBorda}`, flexWrap: "wrap" }}>
+              {[
+                { tipo: "respostas", icon: "📄" },
+                { tipo: "disparos", icon: "📨" },
+              ].map(({ tipo, icon }) => {
+                const info = arquivosInfo[tipo];
+                if (!info) return null;
+                return (
+                  <div key={tipo} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 11 }}>{icon}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: C.texto }}>{info.nome}</span>
+                    <span style={{ fontSize: 11, color: C.cinzaTexto }}>·</span>
+                    <span style={{ fontSize: 11, color: C.cinzaTexto }}>{info.linhas.toLocaleString("pt-BR")} linhas</span>
+                    <span style={{ fontSize: 11, color: C.cinzaTexto }}>·</span>
+                    <span style={{ fontSize: 11, color: C.cinzaTexto }}>{info.data}</span>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
 
