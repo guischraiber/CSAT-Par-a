@@ -57,12 +57,8 @@ function chaveWeek(ano, semana) { return `${ano}_W${semana}`; }
 
 // ── Parser principal ──────────────────────────────────────────────────────────
 function parseData(respostas, disparos, semanasTravadas = {}) {
-  // Detectar anos disponíveis nos dados
-  const anosResp = [...new Set(respostas.map(r => parseInt(r["Ano Resposta"])).filter(a => !isNaN(a)))].sort();
-  const anoAtual = anosResp.length ? anosResp[anosResp.length - 1] : new Date().getFullYear();
-
-  // Enriquecer respostas
-  const respEnrich = respostas.map(r => ({
+  // Enriquecer respostas (sem filtro ainda)
+  const respAll = respostas.map(r => ({
     ...r,
     semana: parseInt(r["Semana Resposta"]),
     mes: parseInt(r["Mês Resposta"]),
@@ -70,9 +66,16 @@ function parseData(respostas, disparos, semanasTravadas = {}) {
     nota: parseInt(r["experiencia_geral"]),
     transp: normTransp(r["TRANSPORTADORA"]),
     comentario: r["comentario_aberto"]?.trim() || "",
-  })).filter(r => !isNaN(r.semana) && !isNaN(r.nota) && r.ano === anoAtual);
+  })).filter(r => !isNaN(r.semana) && !isNaN(r.nota) && !isNaN(r.ano));
 
-  // Enriquecer disparos
+  // Detectar o ano da semana mais recente (evita misturar anos)
+  const maisRecente = respAll.slice().sort((a, b) => b.ano !== a.ano ? b.ano - a.ano : b.semana - a.semana)[0];
+  const anoAtual = maisRecente ? maisRecente.ano : new Date().getFullYear();
+
+  // Filtrar respostas pelo ano da semana mais recente
+  const respEnrich = respAll.filter(r => r.ano === anoAtual);
+
+  // Enriquecer disparos — sem filtro de ano (disparo pode ser de ano anterior à resposta)
   const dispEnrich = disparos.map(r => {
     const d = parseDate(r["Disparo"]);
     if (!d) return null;
@@ -83,6 +86,9 @@ function parseData(respostas, disparos, semanasTravadas = {}) {
       transp: normTransp(r["Transportadora"]),
     };
   }).filter(r => r !== null);
+
+  // Chave de travamento inclui ano para evitar colisão entre anos
+  const chaveW = (semana) => `${anoAtual}_W${semana}`;
 
   // Semanas e meses disponíveis com >= 20 respostas
   const semanaSet = [...new Set(respEnrich.map(r => r.semana))].sort((a,b) => a-b);
@@ -102,12 +108,11 @@ function parseData(respostas, disparos, semanasTravadas = {}) {
   // Calcular agregados do CSV para semanas novas — salvar as que atingiram >= 20
   const novasTravadas = { ...semanasTravadas };
   semanasNovas.forEach(w => {
-    const chave = chaveWeek(anoAtual, w);
+    const chave = chaveW(w);
     const respW = respEnrich.filter(r => r.semana === w);
     const dispW = dispEnrich.filter(r => r.semana === w);
     const totalResp = respW.length;
     if (totalResp >= 20 && !novasTravadas[chave]) {
-      // Travar esta semana pela primeira vez
       novasTravadas[chave] = calcAgregado(respW, dispW, `W${w}`, w, null);
     }
   });
@@ -125,7 +130,7 @@ function parseData(respostas, disparos, semanasTravadas = {}) {
 
   // Calcular porSemana: usar travado se disponível, senão calcular do CSV
   const porSemana = semanas.map(w => {
-    const chave = chaveWeek(anoAtual, w);
+    const chave = chaveW(w);
     if (novasTravadas[chave]) return novasTravadas[chave];
     return calcAgregado(
       respEnrich.filter(r => r.semana === w),
@@ -136,7 +141,6 @@ function parseData(respostas, disparos, semanasTravadas = {}) {
 
   const meses = mesSet.filter(m => respEnrich.filter(r => r.mes === m).length >= 20);
 
-  // Calcular agregado por mês
   const porMes = meses.map(m => calcAgregado(
     respEnrich.filter(r => r.mes === m),
     dispEnrich.filter(r => r.mes === m),
@@ -145,7 +149,7 @@ function parseData(respostas, disparos, semanasTravadas = {}) {
 
   const semanasTravadasCount = Object.keys(novasTravadas).filter(k => k.startsWith(`${anoAtual}_W`)).length;
 
-  return { respEnrich, dispEnrich, porSemana, porMes, semanas, meses, ultimaSemanaEmAndamento, ultimaSemanaRaw, ultimaSemanaResp, semanasTravadasCount };
+  return { respEnrich, dispEnrich, porSemana, porMes, semanas, meses, ultimaSemanaEmAndamento, ultimaSemanaRaw, ultimaSemanaResp, semanasTravadasCount, anoAtual };
 }
 
 function calcAgregado(resp, disp, label, semana, mes) {
@@ -302,9 +306,8 @@ export default function App() {
   const [linkGerado, setLinkGerado] = useState(null);
   const [fromURL, setFromURL] = useState(false);
   const [parceroFiltro, setParceroFiltro] = useState("Todos");
-  const [modoSelecao, setModoSelecao] = useState("unico");
-  const [periodosMulti, setPeriodosMulti] = useState([]);
-  const [arquivosInfo, setArquivosInfo] = useState({ respostas: null, disparos: null });
+  const [modoSelecao, setModoSelecao] = useState("unico"); // "unico" | "consolidar" | "comparar"
+  const [periodosMulti, setPeriodosMulti] = useState([]); // períodos selecionados no modo multi
 
   // Carregar dados da URL ao montar
   useEffect(() => {
@@ -339,7 +342,7 @@ export default function App() {
           const anoLink = decoded.anoAtual || new Date().getFullYear();
           for (const p of (decoded.porSemana || [])) {
             if (p.semana && p.respostas >= 20) {
-              travadas[chaveWeek(anoLink, p.semana)] = p;
+              travadas[`${anoLink}_W${p.semana}`] = p;
             }
           }
           if (Object.keys(travadas).length > 0) {
@@ -353,15 +356,10 @@ export default function App() {
     }
   }, []);
 
-  const loadCSV = useCallback((setter, tipo, onDone) => (e) => {
+  const loadCSV = useCallback((setter, onDone) => (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const agora = new Date().toLocaleString("pt-BR");
-    Papa.parse(file, { header: true, skipEmptyLines: true, complete: ({ data }) => {
-      setter(data);
-      setArquivosInfo(prev => ({ ...prev, [tipo]: { nome: file.name, linhas: data.length, data: agora } }));
-      if (onDone) onDone(data);
-    }});
+    Papa.parse(file, { header: true, skipEmptyLines: true, complete: ({ data }) => { setter(data); if (onDone) onDone(data); } });
   }, []);
 
   const calcular = useCallback((resp, disp) => {
@@ -375,8 +373,8 @@ export default function App() {
     }
   }, []);
 
-  const onRespostas = loadCSV(setRespostas, "respostas", (d) => calcular(d, disparos));
-  const onDisparos = loadCSV(setDisparos, "disparos", (d) => calcular(respostas, d));
+  const onRespostas = loadCSV(setRespostas, (d) => calcular(d, disparos));
+  const onDisparos = loadCSV(setDisparos, (d) => calcular(respostas, d));
 
   // Exportar link comprimido — inclui todas as semanas travadas
   const exportLink = useCallback(async () => {
@@ -387,7 +385,7 @@ export default function App() {
       const slim = {
         semanas: parsed.semanas,
         meses: parsed.meses,
-        anoAtual: parsed.porSemana[0]?.semana ? new Date().getFullYear() : new Date().getFullYear(),
+        anoAtual: parsed.anoAtual || new Date().getFullYear(),
         porSemana: parsed.porSemana.map(p => p.slim || p),
         porMes: parsed.porMes.map(p => p.slim || p),
       };
@@ -607,54 +605,29 @@ export default function App() {
 
       <div style={{ maxWidth: 1000, margin: "0 auto", padding: "28px 32px" }}>
         {/* Upload compacto */}
-        <div style={{ marginBottom: 20, background: C.cinzaCard, border: `1px solid ${C.cinzaBorda}`, borderRadius: 10, overflow: "hidden" }}>
-          {/* Linha principal */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: C.cinzaTexto, flexShrink: 0 }}>Bases:</span>
-            {[
-              { label: "Respostas", tipo: "respostas", loaded: !!respostas, onFile: onRespostas },
-              { label: "Disparos", tipo: "disparos", loaded: !!disparos, onFile: onDisparos },
-            ].map((item, i) => (
-              <label key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 20, cursor: "pointer", border: `1px solid ${item.loaded ? C.verde : C.cinzaBorda}`, background: item.loaded ? C.verdeLight + "55" : C.cinzaFundo }}>
-                <span style={{ fontSize: 13 }}>{item.loaded ? "✅" : "📂"}</span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: item.loaded ? C.verde : C.cinzaTexto }}>{item.label}{item.loaded ? " ✓" : ""}</span>
-                <input type="file" accept=".csv" onChange={item.onFile} style={{ display: "none" }} />
-              </label>
-            ))}
-            {(!respostas || !disparos) && (
-              <span style={{ fontSize: 11, color: C.cinzaTexto, marginLeft: 4 }}>Suba os dois CSVs para carregar o dashboard</span>
-            )}
-            {respostas && disparos && (
-              <span style={{ fontSize: 11, color: C.verde, marginLeft: 4, fontWeight: 600 }}>✓ Prontos — clique em qualquer base para trocar</span>
-            )}
-            {parsed && parsed.semanasTravadasCount > 0 && (
-              <span style={{ fontSize: 11, color: C.azul, marginLeft: "auto", background: C.azulLight, borderRadius: 20, padding: "3px 10px", fontWeight: 600 }}>
-                🔒 {parsed.semanasTravadasCount} semana{parsed.semanasTravadasCount !== 1 ? "s" : ""} travada{parsed.semanasTravadasCount !== 1 ? "s" : ""}
-                <button onClick={() => { if (window.confirm("Apagar todas as semanas travadas? Os dados serão recalculados do CSV.")) { localStorage.removeItem(STORAGE_KEY); calcular(respostas, disparos); } }} style={{ marginLeft: 8, fontSize: 10, color: C.vermelho, background: "none", border: "none", cursor: "pointer", fontWeight: 700, padding: 0 }}>✕ limpar</button>
-              </span>
-            )}
-          </div>
-          {/* Linha de info dos arquivos */}
-          {(arquivosInfo.respostas || arquivosInfo.disparos) && (
-            <div style={{ display: "flex", gap: 16, padding: "6px 16px 8px", borderTop: `1px solid ${C.cinzaBorda}`, flexWrap: "wrap" }}>
-              {[
-                { tipo: "respostas", icon: "📄" },
-                { tipo: "disparos", icon: "📨" },
-              ].map(({ tipo, icon }) => {
-                const info = arquivosInfo[tipo];
-                if (!info) return null;
-                return (
-                  <div key={tipo} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 11 }}>{icon}</span>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: C.texto }}>{info.nome}</span>
-                    <span style={{ fontSize: 11, color: C.cinzaTexto }}>·</span>
-                    <span style={{ fontSize: 11, color: C.cinzaTexto }}>{info.linhas.toLocaleString("pt-BR")} linhas</span>
-                    <span style={{ fontSize: 11, color: C.cinzaTexto }}>·</span>
-                    <span style={{ fontSize: 11, color: C.cinzaTexto }}>{info.data}</span>
-                  </div>
-                );
-              })}
-            </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20, padding: "8px 16px", background: C.cinzaCard, border: `1px solid ${C.cinzaBorda}`, borderRadius: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: C.cinzaTexto, flexShrink: 0 }}>Bases:</span>
+          {[
+            { label: "Respostas", loaded: !!respostas, onFile: onRespostas },
+            { label: "Disparos", loaded: !!disparos, onFile: onDisparos },
+          ].map((item, i) => (
+            <label key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 20, cursor: "pointer", border: `1px solid ${item.loaded ? C.verde : C.cinzaBorda}`, background: item.loaded ? C.verdeLight + "55" : C.cinzaFundo }}>
+              <span style={{ fontSize: 13 }}>{item.loaded ? "✅" : "📂"}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: item.loaded ? C.verde : C.cinzaTexto }}>{item.label}{item.loaded ? " ✓" : ""}</span>
+              <input type="file" accept=".csv" onChange={item.onFile} style={{ display: "none" }} />
+            </label>
+          ))}
+          {(!respostas || !disparos) && (
+            <span style={{ fontSize: 11, color: C.cinzaTexto, marginLeft: 4 }}>Suba os dois CSVs para carregar o dashboard</span>
+          )}
+          {respostas && disparos && (
+            <span style={{ fontSize: 11, color: C.verde, marginLeft: 4, fontWeight: 600 }}>✓ Prontos — clique em qualquer base para trocar</span>
+          )}
+          {parsed && parsed.semanasTravadasCount > 0 && (
+            <span style={{ fontSize: 11, color: C.azul, marginLeft: "auto", background: C.azulLight, borderRadius: 20, padding: "3px 10px", fontWeight: 600 }}>
+              🔒 {parsed.semanasTravadasCount} semana{parsed.semanasTravadasCount !== 1 ? "s" : ""} travada{parsed.semanasTravadasCount !== 1 ? "s" : ""}
+              <button onClick={() => { if (window.confirm("Apagar todas as semanas travadas? Os dados serão recalculados do CSV.")) { localStorage.removeItem(STORAGE_KEY); calcular(respostas, disparos); } }} style={{ marginLeft: 8, fontSize: 10, color: C.vermelho, background: "none", border: "none", cursor: "pointer", fontWeight: 700, padding: 0 }}>✕ limpar</button>
+            </span>
           )}
         </div>
 
