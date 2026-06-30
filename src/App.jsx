@@ -166,7 +166,10 @@ function parseData(respostas, disparos, semanasTravadas = {}) {
 
   const semanasTravadasCount = Object.keys(novasTravadas).filter(k => k.startsWith(`${anoAtual}_W`)).length;
 
-  return { respEnrich, dispEnrich, porSemana, porMes, semanas, meses, ultimaSemanaEmAndamento, ultimaSemanaRaw, ultimaSemanaResp, semanasTravadasCount, anoAtual };
+  // Consolidado anual
+  const porAno = [calcAgregado(respEnrich, dispEnrich, `${anoAtual}`, null, null)];
+
+  return { respEnrich, dispEnrich, porSemana, porMes, porAno, semanas, meses, ultimaSemanaEmAndamento, ultimaSemanaRaw, ultimaSemanaResp, semanasTravadasCount, anoAtual };
 }
 
 function calcAgregado(resp, disp, label, semana, mes) {
@@ -468,13 +471,16 @@ export default function App() {
   const periodos = useMemo(() => {
     if (!parsed) return [];
     if (modoPeriodo === "semana") return parsed.semanas.map(w => ({ val: w, label: `W${w}` }));
-    return parsed.meses.map(m => ({ val: m, label: `Mês ${m}` }));
+    if (modoPeriodo === "mes") return parsed.meses.map(m => ({ val: m, label: `Mês ${m}` }));
+    return [{ val: "ano", label: `${parsed.anoAtual}` }];
   }, [parsed, modoPeriodo]);
 
   // Histórico para gráficos
   const historico = useMemo(() => {
     if (!parsed) return [];
-    return (modoPeriodo === "semana" ? parsed.porSemana : parsed.porMes).map(p => ({ label: p.label, share: p.share, taxa: p.taxa }));
+    if (modoPeriodo === "semana") return parsed.porSemana.map(p => ({ label: p.label, share: p.share, taxa: p.taxa }));
+    if (modoPeriodo === "mes") return parsed.porMes.map(p => ({ label: p.label, share: p.share, taxa: p.taxa }));
+    return parsed.porAno.map(p => ({ label: p.label, share: p.share, taxa: p.taxa }));
   }, [parsed, modoPeriodo]);
 
   // Resetar filtro ao trocar período
@@ -561,7 +567,8 @@ export default function App() {
     if (!parsed) return null;
     if (modoSelecao === "consolidar" && periodoConsolidado) return periodoConsolidado;
     if (modoPeriodo === "semana") return parsed.porSemana.find(s => s.semana === periodoSel) || parsed.porSemana[parsed.porSemana.length - 1];
-    return parsed.porMes.find(m => m.mes === periodoSel) || parsed.porMes[parsed.porMes.length - 1];
+    if (modoPeriodo === "mes") return parsed.porMes.find(m => m.mes === periodoSel) || parsed.porMes[parsed.porMes.length - 1];
+    return parsed.porAno[0] || null;
   }, [parsed, modoPeriodo, periodoSel, modoSelecao, periodoConsolidado]);
 
   // Dados filtrados pelo parceiro selecionado
@@ -708,17 +715,19 @@ export default function App() {
               {/* Linha 1: Semana/Mês + Modo */}
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: C.cinzaTexto, flexShrink: 0 }}>📅 Período:</span>
-                {["semana", "mes"].map(m => (
+                {["semana", "mes", "ano"].map(m => (
                   <button key={m} onClick={() => {
                     setModoPeriodo(m);
                     setPeriodosMulti([]);
-                    setPeriodoSelComReset(m === "semana" ? parsed.semanas[parsed.semanas.length - 1] : parsed.meses[parsed.meses.length - 1]);
+                    if (m === "semana") setPeriodoSelComReset(parsed.semanas[parsed.semanas.length - 1]);
+                    else if (m === "mes") setPeriodoSelComReset(parsed.meses[parsed.meses.length - 1]);
+                    else setPeriodoSelComReset("ano");
                   }} style={{
                     padding: "5px 14px", borderRadius: 20, border: `1px solid ${modoPeriodo === m ? C.laranja : C.cinzaBorda}`,
                     background: modoPeriodo === m ? C.laranja : "transparent",
                     color: modoPeriodo === m ? "#fff" : C.cinzaTexto,
                     cursor: "pointer", fontSize: 12, fontWeight: 600,
-                  }}>{m === "semana" ? "📆 Semana" : "🗓️ Mês"}</button>
+                  }}>{m === "semana" ? "📆 Semana" : m === "mes" ? "🗓️ Mês" : "📅 Ano"}</button>
                 ))}
                 <div style={{ width: 1, height: 18, background: C.cinzaBorda }} />
                 <span style={{ fontSize: 12, fontWeight: 700, color: C.cinzaTexto }}>👁️ Visualização:</span>
@@ -750,6 +759,7 @@ export default function App() {
                 )}
               </div>
               {/* Linha 2: Chips de período */}
+              {modoPeriodo !== "ano" && (
               <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                 {periodos.map(p => {
                   const isUnico = modoSelecao === "unico" && periodoSel === p.val;
@@ -781,6 +791,7 @@ export default function App() {
                   }}>🔒 W{parsed.ultimaSemanaRaw} ({parsed.ultimaSemanaResp} resp.)</span>
                 )}
               </div>
+              )}
             </div>
 
             {/* Tabs */}
@@ -822,8 +833,8 @@ export default function App() {
                   <KpiCard label="Disparos" value={periodoAtual.disparos} format={v => v} badge={periodoAtual.label} />
                 </div>
 
-                {/* Variação vs período anterior */}
-                {modoSelecao === "unico" && (() => {
+                {/* Variação vs período anterior — só em modo semana/mes individual */}
+                {modoSelecao === "unico" && modoPeriodo !== "ano" && (() => {
                   const source = modoPeriodo === "semana" ? parsed.porSemana : parsed.porMes;
                   const idx = source.findIndex(p => p === periodoAtual);
                   const anterior = idx > 0 ? source[idx - 1] : null;
