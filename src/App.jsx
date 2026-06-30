@@ -69,8 +69,18 @@ function parseData(respostas, disparos) {
   const mesSet = [...new Set(respEnrich.map(r => r.mes))].sort((a,b) => a-b);
 
   const semanas = semanaSet.filter(w => {
-    return respEnrich.filter(r => r.semana === w).length >= 20;
+    const cnt = respEnrich.filter(r => r.semana === w).length;
+    if (cnt < 20) return false;
+    return true;
   });
+  // Última semana fica disponível mas marcada como "em andamento" se < 10 respostas
+  // Adicionar última semana do CSV se tiver entre 1 e 19 respostas (para mostrar no seletor travado)
+  const ultimaSemanaRaw = semanaSet[semanaSet.length - 1];
+  const ultimaSemanaResp = ultimaSemanaRaw ? respEnrich.filter(r => r.semana === ultimaSemanaRaw).length : 0;
+  const ultimaSemanaEmAndamento = ultimaSemanaRaw && !semanas.includes(ultimaSemanaRaw) && ultimaSemanaResp > 0;
+  if (ultimaSemanaEmAndamento && ultimaSemanaResp >= 10) {
+    semanas.push(ultimaSemanaRaw);
+  }
   const meses = mesSet.filter(m => {
     return respEnrich.filter(r => r.mes === m).length >= 20;
   });
@@ -89,7 +99,7 @@ function parseData(respostas, disparos) {
     `M${m}`, null, m
   ));
 
-  return { respEnrich, dispEnrich, porSemana, porMes, semanas, meses };
+  return { respEnrich, dispEnrich, porSemana, porMes, semanas, meses, ultimaSemanaEmAndamento, ultimaSemanaRaw, ultimaSemanaResp };
 }
 
 function calcAgregado(resp, disp, label, semana, mes) {
@@ -649,6 +659,18 @@ export default function App() {
                     }}>{p.label}</button>
                   );
                 })}
+                {/* Última semana em andamento (< 10 respostas) — travada */}
+                {modoPeriodo === "semana" && parsed.ultimaSemanaEmAndamento && (
+                  <span title={`W${parsed.ultimaSemanaRaw} em andamento — ${parsed.ultimaSemanaResp} respostas (mín. 10 para desbloquear)`} style={{
+                    padding: "4px 10px", borderRadius: 20, fontSize: 11,
+                    border: `1px solid ${C.cinzaBorda}`,
+                    background: C.amareloLight,
+                    color: C.amarelo,
+                    fontWeight: 600,
+                    cursor: "not-allowed",
+                    opacity: 0.7,
+                  }}>🔒 W{parsed.ultimaSemanaRaw} ({parsed.ultimaSemanaResp} resp.)</span>
+                )}
               </div>
             </div>
 
@@ -690,6 +712,91 @@ export default function App() {
                   <KpiCard label="Respostas" value={periodoAtual.respostas} format={v => v} badge={periodoAtual.label} />
                   <KpiCard label="Disparos" value={periodoAtual.disparos} format={v => v} badge={periodoAtual.label} />
                 </div>
+
+                {/* Variação vs período anterior */}
+                {modoSelecao === "unico" && (() => {
+                  const source = modoPeriodo === "semana" ? parsed.porSemana : parsed.porMes;
+                  const idx = source.findIndex(p => p === periodoAtual);
+                  const anterior = idx > 0 ? source[idx - 1] : null;
+                  if (!anterior) return null;
+                  const delta = periodoAtual.share !== null && anterior.share !== null ? periodoAtual.share - anterior.share : null;
+                  const deltaResp = periodoAtual.respostas - anterior.respostas;
+
+                  // Variação por parceiro
+                  const parceirosVars = periodoAtual.parceiros.map(p => {
+                    const pAnt = anterior.parceiros.find(x => x.nome === p.nome);
+                    if (!pAnt || pAnt.share === null || p.share === null) return null;
+                    return { nome: p.nome, atual: p.share, anterior: pAnt.share, delta: p.share - pAnt.share };
+                  }).filter(Boolean).sort((a, b) => a.delta - b.delta); // piores primeiro
+
+                  const pioraram = parceirosVars.filter(p => p.delta < -0.01);
+                  const melhoraram = parceirosVars.filter(p => p.delta > 0.01);
+
+                  return (
+                    <Card>
+                      <SecHead>📊 Variação vs {anterior.label}</SecHead>
+                      <div style={{ display: "flex", gap: 16, marginBottom: pioraram.length || melhoraram.length ? 16 : 0, flexWrap: "wrap" }}>
+                        <div style={{ padding: "10px 18px", background: delta === null ? C.cinzaFundo : delta >= 0 ? C.verdeLight : C.vermelhoLight, borderRadius: 8, textAlign: "center" }}>
+                          <div style={{ fontSize: 22, fontWeight: 700, color: delta === null ? C.cinzaTexto : delta >= 0 ? C.verde : C.vermelho }}>
+                            {delta === null ? "—" : `${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(2)}pp`}
+                          </div>
+                          <div style={{ fontSize: 11, color: C.cinzaTexto, fontWeight: 600 }}>Share 4-5 {delta !== null ? (delta >= 0 ? "▲" : "▼") : ""}</div>
+                        </div>
+                        <div style={{ padding: "10px 18px", background: C.cinzaFundo, borderRadius: 8, textAlign: "center" }}>
+                          <div style={{ fontSize: 22, fontWeight: 700, color: deltaResp >= 0 ? C.verde : C.amarelo }}>
+                            {deltaResp >= 0 ? "+" : ""}{deltaResp}
+                          </div>
+                          <div style={{ fontSize: 11, color: C.cinzaTexto, fontWeight: 600 }}>Respostas {deltaResp >= 0 ? "▲" : "▼"}</div>
+                        </div>
+                        <div style={{ padding: "10px 18px", background: C.cinzaFundo, borderRadius: 8, textAlign: "center" }}>
+                          <div style={{ fontSize: 22, fontWeight: 700, color: C.cinzaTexto }}>{anterior.label}</div>
+                          <div style={{ fontSize: 11, color: C.cinzaTexto, fontWeight: 600 }}>Share anterior: {pct(anterior.share)}</div>
+                        </div>
+                      </div>
+
+                      {(pioraram.length > 0 || melhoraram.length > 0) && (
+                        <div style={{ display: "grid", gridTemplateColumns: pioraram.length && melhoraram.length ? "1fr 1fr" : "1fr", gap: 16 }}>
+                          {pioraram.length > 0 && (
+                            <div>
+                              <p style={{ fontSize: 11, fontWeight: 700, color: C.vermelho, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>🔴 Pioraram</p>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                {pioraram.map((p, i) => (
+                                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px", borderRadius: 8, background: C.vermelhoLight + "55", border: `1px solid ${C.vermelho}22` }}>
+                                    <span style={{ fontSize: 12, fontWeight: 700, flex: 1 }}>{p.nome}</span>
+                                    <span style={{ fontSize: 11, color: C.cinzaTexto }}>{pct(p.anterior)}</span>
+                                    <span style={{ fontSize: 11, color: C.cinzaTexto }}>→</span>
+                                    <span style={{ fontSize: 12, fontWeight: 700, color: p.atual < 0.85 ? C.vermelho : C.texto }}>{pct(p.atual)}</span>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: C.vermelho, background: C.vermelhoLight, borderRadius: 20, padding: "1px 8px" }}>
+                                      {(p.delta * 100).toFixed(1)}pp ▼
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {melhoraram.length > 0 && (
+                            <div>
+                              <p style={{ fontSize: 11, fontWeight: 700, color: C.verde, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>🟢 Melhoraram</p>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                {melhoraram.map((p, i) => (
+                                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 12px", borderRadius: 8, background: C.verdeLight + "55", border: `1px solid ${C.verde}22` }}>
+                                    <span style={{ fontSize: 12, fontWeight: 700, flex: 1 }}>{p.nome}</span>
+                                    <span style={{ fontSize: 11, color: C.cinzaTexto }}>{pct(p.anterior)}</span>
+                                    <span style={{ fontSize: 11, color: C.cinzaTexto }}>→</span>
+                                    <span style={{ fontSize: 12, fontWeight: 700, color: p.atual < 0.85 ? C.amarelo : C.verde }}>{pct(p.atual)}</span>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: C.verde, background: C.verdeLight, borderRadius: 20, padding: "1px 8px" }}>
+                                      +{(p.delta * 100).toFixed(1)}pp ▲
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </Card>
+                  );
+                })()}
 
                 {/* Distribuição notas */}
                 <Card>
@@ -895,21 +1002,79 @@ export default function App() {
                   );
                 })()}
 
-                {/* Listas de comentários */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                {/* Listas de comentários — 5 por parceiro quando filtro = Todos, normal quando filtrado */}
+                {parceroFiltro !== "Todos" ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                    <Card>
+                      <SecHead>🔴 Comentários Negativos ({periodoFiltrado.comentariosNeg.length})</SecHead>
+                      {periodoFiltrado.comentariosNeg.length === 0
+                        ? <p style={{ fontSize: 13, color: C.cinzaTexto }}>Nenhum comentário negativo.</p>
+                        : <ComentariosList items={periodoFiltrado.comentariosNeg} />}
+                    </Card>
+                    <Card>
+                      <SecHead>🟢 Comentários Positivos ({periodoFiltrado.comentariosPos.length})</SecHead>
+                      {periodoFiltrado.comentariosPos.length === 0
+                        ? <p style={{ fontSize: 13, color: C.cinzaTexto }}>Nenhum comentário positivo.</p>
+                        : <ComentariosList items={periodoFiltrado.comentariosPos} />}
+                    </Card>
+                  </div>
+                ) : (
                   <Card>
-                    <SecHead>🔴 Comentários Negativos ({periodoFiltrado.comentariosNeg.length})</SecHead>
-                    {periodoFiltrado.comentariosNeg.length === 0
-                      ? <p style={{ fontSize: 13, color: C.cinzaTexto }}>Nenhum comentário negativo.</p>
-                      : <ComentariosList items={periodoFiltrado.comentariosNeg} />}
+                    <SecHead>💬 Comentários por Parceiro — {periodoFiltrado.label} (até 5 por parceiro)</SecHead>
+                    {(() => {
+                      const parceirosComComentarios = [...new Set([
+                        ...periodoFiltrado.comentariosNeg.map(c => c.transp),
+                        ...periodoFiltrado.comentariosPos.map(c => c.transp),
+                      ])].sort();
+                      if (parceirosComComentarios.length === 0) return <p style={{ fontSize: 13, color: C.cinzaTexto }}>Nenhum comentário neste período.</p>;
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                          {parceirosComComentarios.map(nome => {
+                            const negs = periodoFiltrado.comentariosNeg.filter(c => c.transp === nome).slice(0, 5);
+                            const pos = periodoFiltrado.comentariosPos.filter(c => c.transp === nome).slice(0, 5);
+                            const totalNegs = periodoFiltrado.comentariosNeg.filter(c => c.transp === nome).length;
+                            const totalPos = periodoFiltrado.comentariosPos.filter(c => c.transp === nome).length;
+                            return (
+                              <div key={nome}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                                  <span style={{ fontSize: 13, fontWeight: 700, color: C.texto }}>{nome}</span>
+                                  {totalNegs > 0 && <span style={{ fontSize: 11, background: C.vermelhoLight, color: C.vermelho, borderRadius: 20, padding: "1px 8px", fontWeight: 600 }}>🔴 {totalNegs} crítica{totalNegs !== 1 ? "s" : ""}</span>}
+                                  {totalPos > 0 && <span style={{ fontSize: 11, background: C.verdeLight, color: C.verde, borderRadius: 20, padding: "1px 8px", fontWeight: 600 }}>🟢 {totalPos} elogio{totalPos !== 1 ? "s" : ""}</span>}
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: negs.length && pos.length ? "1fr 1fr" : "1fr", gap: 12 }}>
+                                  {negs.length > 0 && (
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                                      {negs.map((c, i) => (
+                                        <div key={i} style={{ display: "flex", gap: 8, padding: "8px 10px", background: C.cinzaFundo, borderRadius: 7, borderLeft: `3px solid ${C.vermelho}` }}>
+                                          <span style={{ fontSize: 11, fontWeight: 700, color: C.vermelho, flexShrink: 0 }}>★{c.nota}</span>
+                                          {c.semana && <span style={{ fontSize: 11, color: C.cinzaTexto, flexShrink: 0 }}>W{c.semana}</span>}
+                                          <span style={{ fontSize: 12, color: C.texto, lineHeight: 1.4 }}>{c.comentario}</span>
+                                        </div>
+                                      ))}
+                                      {totalNegs > 5 && <span style={{ fontSize: 11, color: C.cinzaTexto, paddingLeft: 4 }}>+{totalNegs - 5} críticas — filtre por parceiro para ver todas</span>}
+                                    </div>
+                                  )}
+                                  {pos.length > 0 && (
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                                      {pos.map((c, i) => (
+                                        <div key={i} style={{ display: "flex", gap: 8, padding: "8px 10px", background: C.cinzaFundo, borderRadius: 7, borderLeft: `3px solid ${C.verde}` }}>
+                                          <span style={{ fontSize: 11, fontWeight: 700, color: C.verde, flexShrink: 0 }}>★{c.nota}</span>
+                                          {c.semana && <span style={{ fontSize: 11, color: C.cinzaTexto, flexShrink: 0 }}>W{c.semana}</span>}
+                                          <span style={{ fontSize: 12, color: C.texto, lineHeight: 1.4 }}>{c.comentario}</span>
+                                        </div>
+                                      ))}
+                                      {totalPos > 5 && <span style={{ fontSize: 11, color: C.cinzaTexto, paddingLeft: 4 }}>+{totalPos - 5} elogios — filtre por parceiro para ver todos</span>}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </Card>
-                  <Card>
-                    <SecHead>🟢 Comentários Positivos ({periodoFiltrado.comentariosPos.length})</SecHead>
-                    {periodoFiltrado.comentariosPos.length === 0
-                      ? <p style={{ fontSize: 13, color: C.cinzaTexto }}>Nenhum comentário positivo.</p>
-                      : <ComentariosList items={periodoFiltrado.comentariosPos} />}
-                  </Card>
-                </div>
+                )}
               </div>
             )}
             {/* COMPARAÇÃO */}
