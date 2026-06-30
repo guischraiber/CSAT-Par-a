@@ -75,7 +75,7 @@ function parseData(respostas, disparos, semanasTravadas = {}) {
   // Filtrar respostas pelo ano da semana mais recente
   const respEnrich = respAll.filter(r => r.ano === anoAtual);
 
-  // Enriquecer disparos — sem filtro de ano (disparo pode ser de ano anterior à resposta)
+  // Enriquecer disparos — filtrar pelo mesmo ano das respostas (disparo e resposta devem ser do mesmo ano)
   const dispEnrich = disparos.map(r => {
     const d = parseDate(r["Disparo"]);
     if (!d) return null;
@@ -85,7 +85,7 @@ function parseData(respostas, disparos, semanasTravadas = {}) {
       ano: d.getFullYear(),
       transp: normTransp(r["Transportadora"]),
     };
-  }).filter(r => r !== null);
+  }).filter(r => r !== null && r.ano === anoAtual);
 
   // Chave de travamento inclui ano para evitar colisão entre anos
   const chaveW = (semana) => `${anoAtual}_W${semana}`;
