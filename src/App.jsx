@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import Papa from "papaparse";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from "recharts";
 
@@ -315,6 +315,7 @@ async function decodeData(encoded) {
 export default function App() {
   const [respostas, setRespostas] = useState(null);
   const [disparos, setDisparos] = useState(null);
+  const [arquivosInfo, setArquivosInfo] = useState({ respostas: null, disparos: null });
   const [parsed, setParsed] = useState(null);
   const [tab, setTab] = useState("overview");
   const [modoPeriodo, setModoPeriodo] = useState("semana");
@@ -373,11 +374,8 @@ export default function App() {
     }
   }, []);
 
-  const loadCSV = useCallback((setter, onDone) => (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    Papa.parse(file, { header: true, skipEmptyLines: true, complete: ({ data }) => { setter(data); if (onDone) onDone(data); } });
-  }, []);
+  const respostasRef = useRef(null);
+  const disparosRef = useRef(null);
 
   const calcular = useCallback((resp, disp) => {
     if (resp && disp) {
@@ -390,8 +388,24 @@ export default function App() {
     }
   }, []);
 
-  const onRespostas = loadCSV(setRespostas, (d) => calcular(d, disparos));
-  const onDisparos = loadCSV(setDisparos, (d) => calcular(respostas, d));
+  const loadCSV = useCallback((setter, tipo) => (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const agora = new Date().toLocaleString("pt-BR");
+    Papa.parse(file, { header: true, skipEmptyLines: true, complete: ({ data }) => {
+      setter(data);
+      setArquivosInfo(prev => ({ ...prev, [tipo]: { nome: file.name, linhas: data.length, data: agora } }));
+      if (tipo === "respostas") respostasRef.current = data;
+      if (tipo === "disparos") disparosRef.current = data;
+      // Só calcula quando os dois arquivos estiverem prontos
+      if (respostasRef.current && disparosRef.current) {
+        calcular(respostasRef.current, disparosRef.current);
+      }
+    }});
+  }, [calcular]);
+
+  const onRespostas = loadCSV(setRespostas, "respostas");
+  const onDisparos = loadCSV(setDisparos, "disparos");
 
   // Exportar link comprimido — inclui todas as semanas travadas
   const exportLink = useCallback(async () => {
@@ -640,10 +654,13 @@ export default function App() {
           {respostas && disparos && (
             <span style={{ fontSize: 11, color: C.verde, marginLeft: 4, fontWeight: 600 }}>✓ Prontos — clique em qualquer base para trocar</span>
           )}
+          {(!respostas || !disparos) && !parsed && (
+            <span style={{ fontSize: 11, color: C.amarelo, marginLeft: 4 }}>⚠️ Suba os dois arquivos — o dashboard só calcula quando ambos estiverem carregados</span>
+          )}
           {parsed && parsed.semanasTravadasCount > 0 && (
             <span style={{ fontSize: 11, color: C.azul, marginLeft: "auto", background: C.azulLight, borderRadius: 20, padding: "3px 10px", fontWeight: 600 }}>
               🔒 {parsed.semanasTravadasCount} semana{parsed.semanasTravadasCount !== 1 ? "s" : ""} travada{parsed.semanasTravadasCount !== 1 ? "s" : ""}
-              <button onClick={() => { if (window.confirm("Apagar todas as semanas travadas? Os dados serão recalculados do CSV.")) { localStorage.removeItem(STORAGE_KEY); calcular(respostas, disparos); } }} style={{ marginLeft: 8, fontSize: 10, color: C.vermelho, background: "none", border: "none", cursor: "pointer", fontWeight: 700, padding: 0 }}>✕ limpar</button>
+              <button onClick={() => { if (window.confirm("Apagar todas as semanas travadas? Os dados serão recalculados do CSV.")) { localStorage.removeItem(STORAGE_KEY); calcular(respostasRef.current, disparosRef.current); } }} style={{ marginLeft: 8, fontSize: 10, color: C.vermelho, background: "none", border: "none", cursor: "pointer", fontWeight: 700, padding: 0 }}>✕ limpar</button>
             </span>
           )}
         </div>
