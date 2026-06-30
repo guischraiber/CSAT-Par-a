@@ -129,7 +129,9 @@ function parseData(respostas, disparos, semanasTravadas = {}) {
     const respW = respEnrich.filter(r => r.semana === w);
     const dispW = dispEnrich.filter(r => r.semana === w);
     const totalResp = respW.length;
-    if (totalResp >= 20 && !novasTravadas[chave]) {
+    const jaTravadasComDisparos = novasTravadas[chave] && novasTravadas[chave].disparos > 0;
+    // Travar se >= 20 respostas E (ainda não travada OU travada com disparos=0)
+    if (totalResp >= 20 && !jaTravadasComDisparos) {
       novasTravadas[chave] = calcAgregado(respW, dispW, `W${w}`, w, null);
     }
   });
