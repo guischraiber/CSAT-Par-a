@@ -327,10 +327,26 @@ export default function App() {
               comentariosPos: [],
               slim: p,
             })),
+            semanasTravadasCount: (decoded.porSemana || []).length,
           };
           setParsed(restored);
           setPeriodoSel(decoded.semanas?.[decoded.semanas.length - 1] || null);
           setFromURL(true);
+
+          // Salvar semanas do link no localStorage como base para próximo upload
+          const travadas = {};
+          const anoLink = decoded.anoAtual || new Date().getFullYear();
+          for (const p of (decoded.porSemana || [])) {
+            if (p.semana && p.respostas >= 20) {
+              travadas[chaveWeek(anoLink, p.semana)] = p;
+            }
+          }
+          if (Object.keys(travadas).length > 0) {
+            // Mesclar com o que já estava no localStorage (sem sobrescrever)
+            const existentes = carregarSemanasTravadas();
+            const merged = { ...travadas, ...existentes };
+            salvarSemanasTravadas(merged);
+          }
         }
       });
     }
@@ -356,7 +372,7 @@ export default function App() {
   const onRespostas = loadCSV(setRespostas, (d) => calcular(d, disparos));
   const onDisparos = loadCSV(setDisparos, (d) => calcular(respostas, d));
 
-  // Exportar link comprimido
+  // Exportar link comprimido — inclui todas as semanas travadas
   const exportLink = useCallback(async () => {
     if (!parsed) return;
     setCopied("loading");
@@ -365,8 +381,9 @@ export default function App() {
       const slim = {
         semanas: parsed.semanas,
         meses: parsed.meses,
-        porSemana: parsed.porSemana.map(p => p.slim),
-        porMes: parsed.porMes.map(p => p.slim),
+        anoAtual: parsed.porSemana[0]?.semana ? new Date().getFullYear() : new Date().getFullYear(),
+        porSemana: parsed.porSemana.map(p => p.slim || p),
+        porMes: parsed.porMes.map(p => p.slim || p),
       };
       const encoded = await encodeData(slim);
       url = `${window.location.origin}${window.location.pathname}?d=${encoded}`;
@@ -622,7 +639,8 @@ export default function App() {
             {/* Banner fromURL */}
             {fromURL && (
               <div style={{ marginBottom: 16, padding: "10px 16px", background: "#DBEAFE", border: "1px solid #93C5FD", borderRadius: 8, fontSize: 13, color: "#1D4ED8", fontWeight: 500 }}>
-                📎 Dashboard compartilhado — {periodoAtual?.label}/2026. Suba os CSVs para atualizar.
+                📎 Dashboard carregado do link compartilhado — {periodoAtual?.label}/2026.
+                <span style={{ fontWeight: 400, marginLeft: 6 }}>As semanas deste link foram salvas como base. Suba os CSVs para adicionar a semana nova — as anteriores ficam travadas automaticamente.</span>
               </div>
             )}
 
