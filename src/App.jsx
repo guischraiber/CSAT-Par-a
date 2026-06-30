@@ -57,16 +57,33 @@ function chaveWeek(ano, semana) { return `${ano}_W${semana}`; }
 
 // ── Parser principal ──────────────────────────────────────────────────────────
 function parseData(respostas, disparos, semanasTravadas = {}) {
-  // Enriquecer respostas (sem filtro ainda)
-  const respAll = respostas.map(r => ({
-    ...r,
-    semana: parseInt(r["Semana Resposta"]),
-    mes: parseInt(r["Mês Resposta"]),
-    ano: parseInt(r["Ano Resposta"]),
-    nota: parseInt(r["experiencia_geral"]),
-    transp: normTransp(r["TRANSPORTADORA"]),
-    comentario: r["comentario_aberto"]?.trim() || "",
-  })).filter(r => !isNaN(r.semana) && !isNaN(r.nota) && !isNaN(r.ano));
+  // Enriquecer respostas — calcular semana/mês/ano a partir de data_resposta
+  // para evitar linhas com Semana Resposta corrompida (ex: "12/05/2026")
+  const respAll = respostas.map(r => {
+    const nota = parseInt(r["experiencia_geral"]);
+    if (isNaN(nota)) return null;
+
+    // Tentar calcular via data_resposta primeiro
+    const dResp = parseDate(r["data_resposta"]);
+    let semana, mes, ano;
+    if (dResp) {
+      semana = getISOWeek(dResp);
+      mes = dResp.getMonth() + 1;
+      ano = dResp.getFullYear();
+    } else {
+      // Fallback: usar colunas do CSV se data_resposta inválida
+      semana = parseInt(r["Semana Resposta"]);
+      mes = parseInt(r["Mês Resposta"]);
+      ano = parseInt(r["Ano Resposta"]);
+    }
+    if (isNaN(semana) || isNaN(ano)) return null;
+    return {
+      ...r,
+      semana, mes, ano, nota,
+      transp: normTransp(r["TRANSPORTADORA"]),
+      comentario: r["comentario_aberto"]?.trim() || "",
+    };
+  }).filter(r => r !== null);
 
   // Detectar o ano da semana mais recente (evita misturar anos)
   const maisRecente = respAll.slice().sort((a, b) => b.ano !== a.ano ? b.ano - a.ano : b.semana - a.semana)[0];
@@ -75,7 +92,7 @@ function parseData(respostas, disparos, semanasTravadas = {}) {
   // Filtrar respostas pelo ano da semana mais recente
   const respEnrich = respAll.filter(r => r.ano === anoAtual);
 
-  // Enriquecer disparos — filtrar pelo mesmo ano das respostas (disparo e resposta devem ser do mesmo ano)
+  // Enriquecer disparos — filtrar pelo mesmo ano das respostas
   const dispEnrich = disparos.map(r => {
     const d = parseDate(r["Disparo"]);
     if (!d) return null;
